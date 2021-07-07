@@ -1,17 +1,14 @@
 import sys
 import shlex
-import os
 import json
 import logging
-import random
-from subprocess import PIPE
-from os.path import isfile
+
 from argparse import ArgumentParser, SUPPRESS
-from collections import Counter, defaultdict, OrderedDict
+from collections import Counter, defaultdict
 
 import shared.param as param
 from src.utils import subprocess_popen, file_path_from, IUPAC_base_to_num_dict as BASE2NUM, region_from, \
-    reference_sequence_from, str2bool, vcf_candidates_from
+    reference_sequence_from, str2bool
 from shared.interval_tree import bed_tree_from, is_region_in
 from shared.intervaltree.intervaltree import IntervalTree
 
@@ -21,7 +18,25 @@ BASES = set(list(BASE2NUM.keys()) + ["-"])
 
 no_of_positions = param.no_of_positions
 
+# using 5 charaters for store long read name
+CHAR_STR = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!#$%&()*+./:;<=>?[]^`{|}~"
+L_CHAR_STR = len(CHAR_STR)
+EXP = 5
+T_READ_NAME = L_CHAR_STR ** EXP
+L_CHAR_STR_EXP = [L_CHAR_STR ** i for i in range(EXP - 1, 0, -1)]
 
+def simplfy_read_name(rs_idx):
+    rs_idx = (rs_idx + 1) % T_READ_NAME
+    save_read_name = ""
+    div_num = rs_idx
+    for div_exp in L_CHAR_STR_EXP:
+        save_read_name += CHAR_STR[div_num // div_exp]
+        div_num = div_num % div_exp
+    if EXP != 1:
+        save_read_name += CHAR_STR[div_num % L_CHAR_STR]
+    return save_read_name, rs_idx
+
+extend_bp = 1000
 class Position(object):
     def __init__(self, pos, ref_base=None, alt_base=None, read_name_list=None, base_list=None, raw_base_quality=None,
                  raw_mapping_quality=None, af=None, depth=None, genotype=None, phase_set=None):
@@ -44,29 +59,8 @@ class Position(object):
         self.genotype = genotype
         self.read_name_seq = defaultdict(str)
 
-    def update_infos(self):
-        # only proceed when variant exists in candidate windows which greatly improves efficiency
-        self.update_info = True
-        self.read_name_dict = dict(zip(self.read_name_list, self.base_list))
-        self.mapping_quality = [_normalize_mq(phredscore2raw_score(item)) for item in self.raw_mapping_quality]
-        self.base_quality = [_normalize_bq(phredscore2raw_score(item)) for item in self.raw_base_quality]
-
-        for read_name, base_info, bq, mq in zip(self.read_name_list, self.base_list, self.base_quality,
-                                                self.mapping_quality):
-            read_channel, ins_base, query_base = get_tensor_info(base_info, bq, self.ref_base, mq)
-            self.read_info[read_name] = (read_channel, ins_base)
-
-
-class PhasingRead(object):
-    def __init__(self):
-        self.read_seq = defaultdict(str)
-        self.read_start = None
-        self.read_end = None
-
-
 def phredscore2raw_score(qual):
     return ord(qual) - 33
-
 
 def evc_base_from(base):
     if base == 'N':
@@ -80,75 +74,7 @@ def evc_base_from(base):
     else:
         return 'a'
 
-
-def sorted_by_hap_read_name(center_pos, haplotag_dict, pileup_dict, hap_dict, platform):
-    """
-    Sort by reads haplotype after haplotag reads otherwise sort by read start position.
-    center_pos: define the center candidate position for proccessing.
-    haplotag_dict: dictionary (read name : hap type) which keep the read name and haplotype mapping.
-    pileup_dict: dictionary (pos: pos info) which keep read information that cover specific position .
-    hap_dict: similar to haplotag_dict, dictionary (pos: pos info) which keep the read name and haplotype mapping,
-    while haplotype information directly acquire from BAM HP tag.
-    platform: select maximum depth for each platform.
-    """
-    all_nearby_read_name = []
-    start_pos, end_pos = center_pos - flanking_base_num, center_pos + flanking_base_num + 1
-    for p in range(start_pos, end_pos):
-        if p in pileup_dict.keys():
-            all_nearby_read_name += pileup_dict[p].read_name_list
-    all_nearby_read_name = list(OrderedDict.fromkeys(all_nearby_read_name))  # have sorted by order
-    matrix_depth = param.matrix_depth_dict[platform]
-    if len(all_nearby_read_name) > matrix_depth:
-        # set same seed for reproducibility
-        random.seed(0)
-        indices = random.sample(range(len(all_nearby_read_name)), matrix_depth)
-        all_nearby_read_name = [all_nearby_read_name[i] for i in sorted(indices)]
-    sorted_read_name_list = []
-    for order, read_name in enumerate(all_nearby_read_name):
-        hap = max(haplotag_dict[read_name], hap_dict[read_name])  # no phasing is 0
-        sorted_read_name_list.append((hap, order, read_name))
-
-    sorted_read_name_list = sorted(sorted_read_name_list)
-    return sorted_read_name_list
-
-
-def get_tensor_info(base_info, bq, ref_base, read_mq):
-    """
-    Create tensor information for each read level position.
-    base_info: base information include all alternative bases.
-    bq: normalized base quality.
-    ref_base: reference_base: upper reference base for cigar calculation.
-    read_mq: read mapping quality.
-    """
-
-    base, indel = base_info
-    ins_base = ""
-    query_base = ""
-    read_channel = [0] * channel_size
-    if base[0] in '*#':
-        return read_channel, ins_base, query_base
-    strand = STRAND_1
-    if base[0] in 'ACGT':
-        strand = STRAND_0
-    ALT_BASE = 0
-
-    base_upper = base.upper()
-    if indel != '':
-        ALT_BASE = ACGT_NUM[indel[0]]
-    elif (base_upper != ref_base and base_upper in 'ACGT'):
-        base_upper = evc_base_from(base_upper)
-        ALT_BASE = ACGT_NUM[base_upper]
-
-    REF_BASE = ACGT_NUM[ref_base]
-    if len(indel) and indel[0] in '+-':
-        if indel[0] == "+":
-            ins_base = indel[1:].upper()
-    read_channel[:5] = REF_BASE, ALT_BASE, strand, read_mq, bq
-    query_base = "" if base_upper not in "ACGT" else base_upper
-    return read_channel, ins_base, query_base
-
-
-def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, has_pileup_candidates):
+def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate):
     """
     Decode mpileup input string.
     pileup_bases: pileup base string for each position, include all mapping information.
@@ -183,8 +109,6 @@ def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, 
             base_idx += 1
         # skip $, the end of read
         base_idx += 1
-    if has_pileup_candidates:
-        return base_list, None, None, None
 
     pileup_dict = defaultdict(int)
     base_counter = Counter([''.join(item) for item in base_list])
@@ -208,7 +132,7 @@ def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, 
     return base_list, depth, pass_af, af
 
 
-def get_alt_info(center_pos, pileup_dict, ref_seq, reference_sequence, reference_start, hap_dict):
+def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, reference_start, hap_dict, existed_read_names_dict, rn_idx):
     """
     Get alternative information for representation unification, keep all read level alignment information including phasing info.
     center_pos: center position for processing, default window size = no_of_positions = flankingBaseNum + 1 + flankingBaseNum
@@ -220,10 +144,15 @@ def get_alt_info(center_pos, pileup_dict, ref_seq, reference_sequence, reference
     hap_dict: dictionary (pos: pos info) which keep the read name and haplotype mapping.
     """
 
-    reference_base = ref_seq[flanking_base_num]
+    reference_base = reference_sequence[center_pos - reference_start]
     alt_read_name_dict = defaultdict(set)
     depth = 0
-    for (base, indel), read_name in zip(pileup_dict[center_pos].base_list, pileup_dict[center_pos].read_name_list):
+    for (base, indel), read_name in zip(base_list, read_name_list):
+        if read_name in existed_read_names_dict:
+            read_name = existed_read_names_dict[read_name]
+        else:
+            simplfied_read_name, rn_idx = simplfy_read_name(rn_idx)
+            existed_read_names_dict[read_name] = simplfied_read_name
         if base in "#*":
             alt_read_name_dict['*'].add(read_name)
             depth += 1
@@ -250,7 +179,7 @@ def get_alt_info(center_pos, pileup_dict, ref_seq, reference_sequence, reference
 
     alt_info = str(depth) + '\t' + json.dumps(alt_read_name_dict)
 
-    return alt_info
+    return alt_info, rn_idx
 
 
 class TensorStdout(object):
@@ -262,16 +191,16 @@ class TensorStdout(object):
 
 
 def ExtractCandidates(args):
+
     ctg_start = args.ctgStart
     ctg_end = args.ctgEnd
-    full_aln_regions = args.full_aln_regions
     fasta_file_path = args.ref_fn
     ctg_name = args.ctgName
     samtools_execute_command = args.samtools
     bam_file_path = args.bam_fn
     chunk_id = args.chunk_id - 1 if args.chunk_id else None  # 1-base to 0-base
     chunk_num = args.chunk_num
-
+    phasing_info_in_bam = args.phasing_info_in_bam
     minimum_af_for_candidate = args.min_af
     min_coverage = args.minCoverage
     platform = args.platform
@@ -281,59 +210,20 @@ def ExtractCandidates(args):
     is_extend_bed_file_given = extend_bed is not None
     min_mapping_quality = args.minMQ
     min_base_quality = args.minBQ
-    vcf_fn = args.vcf_fn
-    is_known_vcf_file_provided = vcf_fn is not None
-
+    unify_repre_fn = args.unify_repre_fn
     # global test_pos
+    test_pos = None
     # test_pos = None
-    hete_snp_pos_dict = defaultdict()
-    hete_snp_tree = IntervalTree()
-    need_phasing_pos_set = set()
     add_read_regions = True
-    if full_aln_regions:
-
-        """
-        If given full alignment bed regions, all candidate positions will be directly selected from each row, define as 
-        'ctg start end', where 0-based center position is the candidate for full alignment calling.
-        if 'need_phasing' option enables, full alignment bed regions will also include nearby heterozygous snp candidates for reads
-        haplotag, which is faster than whatshap haplotag with more memory occupation.
-        """
-
-        candidate_file_path_process = subprocess_popen(shlex.split("gzip -fdc %s" % (full_aln_regions)))
-        candidate_file_path_output = candidate_file_path_process.stdout
-
-        ctg_start, ctg_end = float('inf'), 0
-        for row in candidate_file_path_output:
-            row = row.rstrip().split('\t')
-            if row[0] != ctg_name: continue
-            position = int(row[1]) + 1
-            end = int(row[2]) + 1
-            ctg_start = min(position, ctg_start)
-            ctg_end = max(end, ctg_end)
-
-            if platform == "ilmn":
-                continue
-            if len(row) > 3:  # hete snp positions
-                center_pos = position + extend_bp + 1
-                ref_base, alt_base, genotype, phase_set = row[3].split('-')
-                hete_snp_pos_dict[center_pos] = Position(pos=center_pos, ref_base=ref_base, alt_base=alt_base,
-                                                         genotype=int(genotype), phase_set=phase_set)
-                hete_snp_tree.addi(begin=center_pos - extend_bp, end=center_pos + extend_bp + 1)
-            else:
-                center = position + (end - position) // 2 - 1
-                need_phasing_pos_set.add(center)
-        candidate_file_path_output.close()
-        candidate_file_path_process.wait()
 
     if platform == 'ilmn' and bam_file_path == "PIPE":
         add_read_regions = False
 
     fai_fn = file_path_from(fasta_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
 
-    if is_known_vcf_file_provided:
-        known_variants_list = vcf_candidates_from(vcf_fn=vcf_fn, contig_name=ctg_name)
-        known_variants_set = set(known_variants_list)
-    if not full_aln_regions and chunk_id is not None:
+    ru_fp = open(unify_repre_fn, 'w')
+
+    if chunk_id is not None:
 
         """
         Whole genome calling option, acquire contig start end position from reference fasta index(.fai), then split the
@@ -359,38 +249,8 @@ def ExtractCandidates(args):
         if bam_file_path == "PIPE":
             add_read_regions = False
 
-    if phased_vcf_fn and os.path.exists(phased_vcf_fn):
-        # if need_phasing option enables, scan the phased vcf file and store the heterozygous snp candidates from each phase set
-        unzip_process = subprocess_popen(shlex.split("gzip -fdc %s" % (phased_vcf_fn)))
-        for row in unzip_process.stdout:
-            row = row.rstrip()
-            if row[0] == '#':
-                continue
-            columns = row.strip().split('\t')
-            contig_name = columns[0]
-            if ctg_name and contig_name != ctg_name:
-                continue
-            pos = int(columns[1])
-            if ctg_start and ctg_end:
-                if pos < ctg_start - phasing_window_size or pos > ctg_end + phasing_window_size:
-                    continue
-            ref_base = columns[3]
-            alt_base = columns[4]
-            genotype_info = columns[9].split(':')
-            genotype, phase_set = genotype_info[0], genotype_info[-1]
-            if '|' not in genotype:  # unphasable
-                continue
-            genotype = ('1' if genotype == '0|1' else '2')
-            # need in phasing_window
-            hete_snp_pos_dict[pos] = Position(pos=pos, ref_base=ref_base, alt_base=alt_base,
-                                              genotype=int(genotype), phase_set=phase_set)
-            hete_snp_tree.addi(begin=pos - extend_bp, end=pos + extend_bp + 1)
-
-    # preparation for candidates near variants
-    need_phasing_pos_set = set([item for item in need_phasing_pos_set if item >= ctg_start and item <= ctg_end])
     ref_regions = []
     reads_regions = []
-
     is_ctg_name_given = ctg_name is not None
     is_ctg_range_given = is_ctg_name_given and ctg_start is not None and ctg_end is not None
     extend_start, extend_end = None, None
@@ -418,9 +278,9 @@ def ExtractCandidates(args):
     mq_option = ' --min-MQ {}'.format(min_mapping_quality)
     bq_option = ' --min-BQ {}'.format(min_base_quality)
     # pileup bed first
+    output_qname_option = " --output-QNAME "
     bed_option = ' -l {}'.format(
         extend_bed) if is_extend_bed_file_given and platform != 'ilmn' else ""
-    bed_option = ' -l {}'.format(full_aln_regions) if is_full_aln_regions_given and platform != 'ilmn' else bed_option
     flags_option = ' --excl-flags {}'.format(param.SAMTOOLS_VIEW_FILTER_FLAG)
     max_depth_option = ' --max-depth {}'.format(args.max_depth) if args.max_depth > 0 else ""
     reads_regions_option = ' -r {}'.format(" ".join(reads_regions)) if add_read_regions else ""
@@ -429,121 +289,63 @@ def ExtractCandidates(args):
     bam_file_path = bam_file_path if bam_file_path != "PIPE" else "-"
     samtools_command = "{} mpileup  {} --reverse-del".format(samtools_execute_command,
                                                                                         bam_file_path) + \
-                       reads_regions_option + phasing_option + mq_option + bq_option + bed_option + flags_option + max_depth_option
+                       output_qname_option + reads_regions_option + phasing_option + mq_option + bq_option + bed_option + flags_option + max_depth_option
     samtools_mpileup_process = subprocess_popen(
         shlex.split(samtools_command), stdin=stdin)
 
-
     hap_dict = defaultdict(int)
-    haplotag_dict = defaultdict(int)
     pileup_dict = defaultdict(str)
-    phasing_read_seq = defaultdict(PhasingRead)
-    extend_bp_distance = no_of_positions + param.extend_bp
-    confident_bed_tree = bed_tree_from(bed_file_path=confident_bed_fn,
-                                       contig_name=ctg_name,
-                                       bed_ctg_start=extend_start,
-                                       bed_ctg_end=extend_end)
+    # confident_bed_tree = bed_tree_from(bed_file_path=confident_bed_fn,
+    #                                    contig_name=ctg_name,
+    #                                    bed_ctg_start=extend_start,
+    #                                    bed_ctg_end=extend_end)
 
     extend_bed_tree = bed_tree_from(bed_file_path=extend_bed,
                                     contig_name=ctg_name,
                                     bed_ctg_start=extend_start,
                                     bed_ctg_end=extend_end)
-
-    def samtools_pileup_generator_from(samtools_mpileup_process):
-        need_phasing_pos_list = sorted(list(need_phasing_pos_set))
-        current_pos_index = 0
-        has_pileup_candidates = len(need_phasing_pos_set)
-        for row in samtools_mpileup_process.stdout:  # chr position N depth seq BQ read_name mapping_quality phasing_info
-            columns = row.strip().split('\t')
-            pos = int(columns[1])
-            # pos that near bed region should include some indel cover in bed
-            pass_extend_bed = not is_extend_bed_file_given or is_region_in(extend_bed_tree,
-                                                                                     ctg_name, pos - 1,
-                                                                                     pos + 1)
-            pass_ctg_range = not ctg_start or (pos >= ctg_start and pos <= ctg_end)
-            if not has_pileup_candidates and not pass_extend_bed and pass_ctg_range:
-                continue
-            pileup_bases = columns[4]
-            raw_base_quality = columns[5]
-            read_name_list = columns[6].split(',')
-            raw_mapping_quality = columns[7]
-            reference_base = evc_base_from(reference_sequence[pos - reference_start].upper())  # ev
-            base_list, depth, pass_af, af = decode_pileup_bases(pileup_bases=pileup_bases,
-                                                                reference_base=reference_base,
-                                                                minimum_af_for_candidate=minimum_af_for_candidate,
-                                                                has_pileup_candidates=has_pileup_candidates)
-
-            if phasing_info_in_bam:
-                phasing_info = columns[8].split(',')
-                # https://github.com/HKU-BAL/Clair3/issues/32, skip adding phase info when BAM phase info lacks
-                # add read name list size check in following steps
-                if len(read_name_list) != len(phasing_info):
-                    continue
-                else:
-                    for hap_idx, hap in enumerate(phasing_info):
-                        if hap in '12' and read_name_list[hap_idx] not in hap_dict:
-                            hap_dict[read_name_list[hap_idx]] = int(hap)
-
-            if len(read_name_list) != len(base_list):
-                continue
-
-            if not is_known_vcf_file_provided and not has_pileup_candidates and reference_base in 'ACGT' and (
-                    pass_af and depth >= min_coverage):
-                need_phasing_pos_list.append(pos)
-
-            if is_known_vcf_file_provided and not has_pileup_candidates and pos in known_variants_set:
-                need_phasing_pos_list.append(pos)
-            
-            pileup_dict[pos] = Position(pos=pos,
-                                        ref_base=reference_base,
-                                        read_name_list=read_name_list,
-                                        base_list=base_list,
-                                        raw_base_quality=raw_base_quality,
-                                        raw_mapping_quality=raw_mapping_quality,
-                                        af=af,
-                                        depth=depth)
-
-            overlap_hete_region = hete_snp_tree.at(pos)
-
-            if current_pos_index < len(need_phasing_pos_list) and pos - need_phasing_pos_list[
-                current_pos_index] > extend_bp_distance:
-                yield need_phasing_pos_list[current_pos_index]
-                for pre_pos in sorted(pileup_dict.keys()):
-                    if need_phasing_pos_list[current_pos_index] - pre_pos > extend_bp_distance:
-                        del pileup_dict[pre_pos]
-                    else:
-                        break
-                current_pos_index += 1
-        while current_pos_index != len(need_phasing_pos_list):
-            yield need_phasing_pos_list[current_pos_index]
-            for pre_pos in sorted(pileup_dict.keys()):
-                if need_phasing_pos_list[current_pos_index] - pre_pos > extend_bp_distance:
-                    del pileup_dict[pre_pos]
-                else:
-                    break
-            current_pos_index += 1
-
-        yield None
-
-    samtools_pileup_generator = samtools_pileup_generator_from(samtools_mpileup_process)
-
-    while True:
-        pos = next(samtools_pileup_generator)
-        if pos is None:
-            break
-        if pos not in pileup_dict:
+    rn_idx = -1
+    existed_read_names_dict = defaultdict(str)
+    for row in samtools_mpileup_process.stdout:  # chr position N depth seq BQ read_name mapping_quality phasing_info
+        columns = row.strip().split('\t')
+        pos = int(columns[1])
+        # pos that near bed region should include some indel cover in bed
+        pass_extend_bed = not is_extend_bed_file_given or is_region_in(extend_bed_tree,
+                                                                                 ctg_name, pos - 1,
+                                                                                 pos + 1)
+        pass_ctg_range = not ctg_start or (pos >= ctg_start and pos <= ctg_end)
+        if not pass_extend_bed and pass_ctg_range:
             continue
+        pileup_bases = columns[4]
+        read_name_list = columns[6].split(',')
 
-        ref_seq = reference_sequence[
-                  pos - reference_start - flanking_base_num: pos - reference_start + flanking_base_num + 1].upper()
-        label_info = get_alt_info(center_pos=pos,
-                                  pileup_dict=pileup_dict,
-                                  ref_seq=ref_seq,
-                                  reference_sequence=reference_sequence,
-                                  reference_start=reference_start,
-                                  hap_dict=hap_dict)
-        label_fp.write('\t'.join([ctg_name + ' ' + str(pos), label_info]) + '\n')
+        reference_base = evc_base_from(reference_sequence[pos - reference_start].upper())
+        base_list, depth, pass_af, af = decode_pileup_bases(pileup_bases=pileup_bases,
+                                                            reference_base=reference_base,
+                                                            minimum_af_for_candidate=minimum_af_for_candidate)
 
+        if phasing_info_in_bam:
+            phasing_info = columns[8].split(',')
+            # add read name list size check in following steps
+            if len(read_name_list) != len(phasing_info) or len(read_name_list) != len(base_list):
+                continue
+            else:
+                for hap_idx, hap in enumerate(phasing_info):
+                    if hap in '12' and read_name_list[hap_idx] not in hap_dict:
+                        hap_dict[read_name_list[hap_idx]] = int(hap)
+
+        if reference_base in 'ACGT' and (pass_af and depth >= min_coverage):
+            label_info,rn_idx = get_alt_info(center_pos=pos,
+                                      base_list=base_list,
+                                      read_name_list=read_name_list,
+                                      reference_sequence=reference_sequence,
+                                      reference_start=reference_start,
+                                      hap_dict=hap_dict,
+                                      existed_read_names_dict=existed_read_names_dict,
+                                      rn_idx =rn_idx)
+            ru_fp.write('\t'.join([ctg_name + ' ' + str(pos), label_info]) + '\n')
+
+    ru_fp.close()
     samtools_mpileup_process.stdout.close()
     samtools_mpileup_process.wait()
 
@@ -554,10 +356,10 @@ def main():
     parser.add_argument('--platform', type=str, default='ont',
                         help="Sequencing platform of the input. Options: 'ont,hifi,ilmn', default: %(default)s")
 
-    parser.add_argument('--bam_fn', type=str, default="input.bam", required=True,
+    parser.add_argument('--bam_fn', type=str, default="input.bam", #required=True,
                         help="Sorted BAM file input, required")
 
-    parser.add_argument('--ref_fn', type=str, default="ref.fa", required=True,
+    parser.add_argument('--ref_fn', type=str, default="ref.fa", #required=True,
                         help="Reference fasta file input, required")
 
     parser.add_argument('--tensor_can_fn', type=str, default="PIPE",
@@ -610,7 +412,7 @@ def main():
     parser.add_argument('--phasing_window_size', type=int, default=param.phasing_window_size,
                         help="DEBUG: The window size for read phasing")
 
-    parser.add_argument('--extend_bed', nargs='?', action="store", type=str, default=None,
+    parser.add_argument('--extend_bed', type=str, default=None,
                         help="DEBUG: Extend the regions in the --bed_fn by a few bp for tensor creation, default extend 16bp")
 
     parser.add_argument('--indel_fn', type=str, default=None,
