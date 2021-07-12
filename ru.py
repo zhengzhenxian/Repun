@@ -17,7 +17,8 @@ data_preprocess_folder = [
     "SplitExtendBed",
     "UnifyRepresentation",
     'VcfReader',
-    "SortVcf"
+    "SortVcf",
+    "PlotAlignment"
 ]
 
 post_process_scripts_folder = [
