@@ -102,6 +102,7 @@ def find_read_support(variants, ref, variant_type, max_calculate_count, read_seq
             ref_start = ref.start
             ref_end = ref.end
             read_seq = read_name_info_dict[read_name].seq
+            read_seq = read_name_info_dict[read_name].update_seq(reference_sequence=ref.reference_sequence, reference_start=ref.reference_start) if read_seq == "" else read_seq
             if not len(read_seq):
                 continue
             ref_offset, alt_offset, pre_end = 0, 0, 0
@@ -374,6 +375,21 @@ class Read(object):
         self.end = None
         self.seq = []
 
+    def update_seq(self, reference_sequence, reference_start):
+        for pos, alt_base in self.pos_alt_dict.items():
+            self.start = min(self.start, pos) if self.start is not None else pos
+            if alt_base[0] == 'X':
+                self.seq.append((pos, pos+1, alt_base[1]))
+            elif alt_base[0] == 'I':
+                self.seq.append((pos, pos+1, alt_base[1:]))
+            elif alt_base[0] == 'D':
+                del_length = len(alt_base[1:])
+                self.seq.append((pos, pos+del_length+1, reference_sequence[pos - reference_start]))
+            else: #"R"
+              continue
+        self.end = max([item[1] for item in self.seq]) if len(self.seq) else None
+
+        return self.seq
 
 def decode_alt_info(cigar_count, ref_base, depth, minimum_allele_gap):
     """
@@ -395,12 +411,10 @@ def decode_alt_info(cigar_count, ref_base, depth, minimum_allele_gap):
 
     # select maximum 2 variants type
     seq_insertion_bases_list = alt_list[:2]
-    af_list = []
     for alt_type, count in seq_insertion_bases_list:
         count = int(count)
         if count / float(depth) < minimum_allele_gap:
             continue
-        af_list.append(count/ float(depth))
         if alt_type[0] == 'X':
             alt_type_list.append(alt_type[1])
         elif alt_type[0] == 'I':
@@ -419,7 +433,7 @@ def decode_alt_info(cigar_count, ref_base, depth, minimum_allele_gap):
             new_del_list.append(
                 ref_base + append_del_bases)  # ACG-> A, ACGTT -> A, max_del_cigar is CGTT, represent ACG-> A to ACGTT->ATT
     alt_base_list = alt_type_list + new_del_list
-    return ref_represatation, alt_base_list, af_list, alt_list
+    return ref_represatation, alt_base_list, alt_list
 
 def has_variant_suport(ref_base, alt_base, pos, alt_dict):
     """
@@ -491,6 +505,7 @@ def lock_variant(variant, truth):
 
     if len(variant_alt_base) != len(truth_alt_base):
         return None, False
+
     tmp_alt_list = []
     for ab in variant_alt_base:
         ref_base1, alt_base1 = remove_common_suffix(variant_ref_base, [ab])
@@ -620,6 +635,83 @@ def check_confident_match(candidates, truths):
                 if candidate.reference_bases != truth.reference_bases or candidate.alternate_bases != truth.alternate_bases:
                     return False
     return True
+
+# def split_variants_truths(candidates,
+#                           truths,
+#                           partition_size,
+#                           max_candidates_distance,
+#                           max_calculate_count,
+#                           variant_dict=None,
+#                           alt_dict=None):
+#     """
+#     Split all candidate sites and true variant according to the start position, for true variant site, we extend the
+#     at least one candidate site in both two sides to aviod missing match.
+#     """
+#     INFO = collections.namedtuple('INFO', ['start', 'type', 'variant'])
+#     def match_max_candidate_distance(partition, variants, new_count):
+#         if not partition:
+#             return True
+#         n_of_type = sum(1 for g in partition if g.type == variants.type)
+#         if new_count >= max_calculate_count or n_of_type >= partition_size:
+#             if new_count >= max_calculate_count:
+#                 print('{} exceed max calculation count'.format(new_count))
+#             return False
+#         else:
+#             for g in partition:
+#                 if variants.variant.start - g.variant.end + 1 > max_candidates_distance:
+#                     return False
+#
+#             last_par = partition[-1].variant.end
+#             if variants.variant.start - last_par + 1 > extend_bp:
+#                 return False
+#             return True
+#
+#     truths_pos_set = set([v.start for v in truths])
+#     sorted_variants = list(heapq.merge(
+#         [INFO(v.start, 'candidate', v) for v in candidates],
+#         [INFO(t.start, 'truth', t) for t in truths]))
+#
+#     all_partitions = []
+#     partition = []
+#     product_count = 1
+#     for sv_idx in range(len(sorted_variants)):
+#         variants = sorted_variants[sv_idx]
+#         new_count = product_count * all_genotypes_combination(
+#             variants, variant_dict, alt_dict)
+#         if match_max_candidate_distance(partition, variants,
+#                                         new_count):
+#             partition.append(variants)
+#             product_count = new_count
+#         else:
+#             if variants.start == partition[-1].start and variants.type != partition[
+#                 -1].type:  #
+#                 # add same truths or variants together and add at least one nearby candidate
+#                 partition.append(variants)
+#                 if sv_idx < len(sorted_variants) - 1 and sorted_variants[sv_idx + 1].start not in truths_pos_set and \
+#                         sorted_variants[sv_idx + 1].start - variants.start <= extend_bp:
+#                     partition.append(sorted_variants[sv_idx + 1])
+#                 all_partitions.append(partition)
+#                 partition = []
+#                 product_count = 1
+#             else:
+#                 all_partitions.append(partition)
+#                 partition = [variants]
+#                 product_count = all_genotypes_combination(variants, variant_dict, alt_dict)
+#     if partition:
+#         all_partitions.append(partition)
+#
+#     split_partitions = []
+#     for partitions in all_partitions:
+#         candidate_partitions = []
+#         truth_partitions = []
+#         for p in partitions:
+#             if p.type == 'candidate':
+#                 candidate_partitions.append(p.variant)
+#             elif p.type == 'truth':
+#                 truth_partitions.append(p.variant)
+#         split_partitions.append([candidate_partitions, truth_partitions])
+#     return split_partitions
+
 
 def split_variants_truths(candidates,
                           truths,
@@ -1152,13 +1244,13 @@ def UnifyRepresentation(args):
         cigar_count = ' '.join([' '.join([item, str(len(var_read_dict[item].split(' ')))]) for item in var_read_dict.keys()])
         ref_base = reference_sequence[pos - reference_start]
         pos_in_truths = pos in variant_dict
-        ref_base, alt_base, af_list, alt_list = decode_alt_info(cigar_count=cigar_count,
+        ref_base, alt_base, alt_list = decode_alt_info(cigar_count=cigar_count,
                                                                ref_base=ref_base,
                                                                depth=depth,
                                                                minimum_allele_gap=minimum_allele_gap)
 
         alt_dict[pos] = Position(pos=pos,
-                                 ref_base=ref_base,
+                                ref_base=ref_base,
                                  alt_base=alt_base,
                                  genotype1=-1,
                                  genotype2=-1,
@@ -1193,6 +1285,7 @@ def UnifyRepresentation(args):
                                                                 variant_dict=variant_dict,
                                                                 allele_gap=minimum_allele_gap,
                                                                 platform=platform)
+
         # lock the candidate if it has meet the phased_genotype requirement and have a exactly one match true variant site
         if alt_dict[pos].phased_genotype and pos_in_truths and is_variant_confident:
             if alt_dict[pos].phased_genotype.count(0) != variant_dict[pos].genotype.count(0) or (sum(variant_dict[pos].genotype) == 3 and sum(alt_dict[pos].phased_genotype) != 3):
@@ -1205,21 +1298,9 @@ def UnifyRepresentation(args):
 
     if is_confident_bed_file_given:
         tree = bed_tree_from(bed_fn, contig_name=contig_name)
-    for read_name, read in read_name_info_dict.items():
-        if not len(read_name_info_dict[read_name].pos_alt_dict):
-            continue
-        for pos, alt_base in read_name_info_dict[read_name].pos_alt_dict.items():
-            read.start = min(read.start, pos) if read.start is not None else pos
-            if alt_base[0] == 'X':
-                read.seq.append((pos, pos+1, alt_base[1]))
-            elif alt_base[0] == 'I':
-                read.seq.append((pos, pos+1, alt_base[1:]))
-            elif alt_base[0] == 'D':
-                del_length = len(alt_base[1:])
-                read.seq.append((pos, pos+del_length+1, reference_sequence[pos - reference_start]))
-            else: #"R"
-              continue
-        read.end = max([item[1] for item in read.seq]) if len(read.seq) else None
+    # for read_name, read in read_name_info_dict.items():
+    #     if not len(read_name_info_dict[read_name].pos_alt_dict):
+    #         continue
 
     if not len(alt_dict) or not len(variant_dict):
         return
@@ -1256,6 +1337,7 @@ def UnifyRepresentation(args):
 
     if not len(variants) and not len(truths):
         return
+
     RU = RepresentationUnification(
         sample_name=sample_name,
         contig_name=contig_name,
