@@ -14,27 +14,46 @@ from shared.intervaltree.intervaltree import IntervalTree
 
 logging.basicConfig(format='%(message)s', level=logging.INFO)
 BASES = set(list(BASE2NUM.keys()) + ["-"])
-
-
 no_of_positions = param.no_of_positions
 
-# using 5 charaters for store long read name
-CHAR_STR = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!#$%&()*+./:;<=>?[]^`{|}~"
-L_CHAR_STR = len(CHAR_STR)
-EXP = 5
-T_READ_NAME = L_CHAR_STR ** EXP
-L_CHAR_STR_EXP = [L_CHAR_STR ** i for i in range(EXP - 1, 0, -1)]
+# using 3 charaters for store long read name
 
-def simplfy_read_name(rs_idx):
-    rs_idx = (rs_idx + 1) % T_READ_NAME
-    save_read_name = ""
-    div_num = rs_idx
-    for div_exp in L_CHAR_STR_EXP:
-        save_read_name += CHAR_STR[div_num // div_exp]
-        div_num = div_num % div_exp
-    if EXP != 1:
-        save_read_name += CHAR_STR[div_num % L_CHAR_STR]
-    return save_read_name, rs_idx
+class ReadNameSimplifier(object):
+    # reduce long read name
+    def __init__(self, EXP=3):
+        self.CHAR_STR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+./:;<=>?[]^`{|}~"
+        self.L_CHAR_STR = len(self.CHAR_STR)
+        self.update_exp(EXP=EXP)
+        self.existed_read_names_dict = defaultdict(str)
+    def update_exp(self, EXP=3):
+        self.EXP = EXP
+        self.T_READ_NAME = self.L_CHAR_STR ** self.EXP
+        self.L_CHAR_STR_EXP = [self.L_CHAR_STR ** i for i in range(self.EXP - 1, 0, -1)]
+        self.rn_idx = -1
+
+    def simplfy_read_name(self):
+        if self.rn_idx + 1 >= self.T_READ_NAME:
+            self.update_exp(EXP=self.EXP+1)
+        self.rn_idx += 1
+        save_read_name = ""
+        div_num = self.rn_idx
+        for div_exp in self.L_CHAR_STR_EXP:
+            save_read_name += self.CHAR_STR[div_num // div_exp]
+            div_num = div_num % div_exp
+        if self.EXP != 1:
+            save_read_name += self.CHAR_STR[div_num % self.L_CHAR_STR]
+        return save_read_name
+#
+# def simplfy_read_name(rs_idx):
+#     rs_idx = (rs_idx + 1) % T_READ_NAME
+#     save_read_name = ""
+#     div_num = rs_idx
+#     for div_exp in L_CHAR_STR_EXP:
+#         save_read_name += CHAR_STR[div_num // div_exp]
+#         div_num = div_num % div_exp
+#     if EXP != 1:
+#         save_read_name += CHAR_STR[div_num % L_CHAR_STR]
+#     return save_read_name, rs_idx
 
 extend_bp = 1000
 class Position(object):
@@ -132,7 +151,7 @@ def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate):
     return base_list, depth, pass_af, af
 
 
-def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, reference_start, hap_dict, existed_read_names_dict, rn_idx):
+def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, reference_start, hap_dict, read_name_simplfier):
     """
     Get alternative information for representation unification, keep all read level alignment information including phasing info.
     center_pos: center position for processing, default window size = no_of_positions = flankingBaseNum + 1 + flankingBaseNum
@@ -148,13 +167,13 @@ def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, refe
     alt_read_name_dict = defaultdict(set)
     depth = 0
     for (base, indel), read_name in zip(base_list, read_name_list):
-        if read_name in existed_read_names_dict:
-            read_name = existed_read_names_dict[read_name]
+        if read_name in read_name_simplfier.existed_read_names_dict:
+            simplfied_read_name = read_name_simplfier.existed_read_names_dict[read_name]
         else:
-            simplfied_read_name, rn_idx = simplfy_read_name(rn_idx)
-            existed_read_names_dict[read_name] = simplfied_read_name
+            simplfied_read_name = read_name_simplfier.simplfy_read_name()
+            read_name_simplfier.existed_read_names_dict[read_name] = simplfied_read_name
+        read_name = simplfied_read_name
         if base in "#*":
-            alt_read_name_dict['*'].add(read_name)
             depth += 1
             continue
         depth += 1
@@ -175,11 +194,11 @@ def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, refe
 
     for alt_type, read_name_set in list(alt_read_name_dict.items()):
         alt_read_name_dict[alt_type] = ' '.join(
-            [read_name + '_' + str(hap_dict[read_name]) for read_name in list(read_name_set)])
+            [read_name + str(hap_dict[read_name]) for read_name in list(read_name_set)])
 
     alt_info = str(depth) + '\t' + json.dumps(alt_read_name_dict)
 
-    return alt_info, rn_idx
+    return alt_info
 
 
 class TensorStdout(object):
@@ -214,6 +233,16 @@ def ExtractCandidates(args):
     # global test_pos
     test_pos = None
     # test_pos = None
+    if args.test_pos == 0 and test_pos:
+        samtools_execute_command="/autofs/bal33/zxzheng/env/miniconda2/envs/clair2/bin/samtools"
+        bam_file_path = "/autofs/bal33/zxzheng/TMP/docker/myself/bam_alignment/HG002_35x_PacBio_14kb-15kb.bam"
+        fasta_file_path = "/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta"
+        ctg_name = "chr20"
+        chunk_num = 100
+        chunk_id = 1
+        platform = "ont"
+        extend_bed = ""
+        unify_repre_fn = "/autofs/bal33/zxzheng/TMP/tmp1"
     add_read_regions = True
 
     if platform == 'ilmn' and bam_file_path == "PIPE":
@@ -223,11 +252,12 @@ def ExtractCandidates(args):
 
     ru_fp = open(unify_repre_fn, 'w')
 
+    read_name_simplfier = ReadNameSimplifier()
     if chunk_id is not None:
 
         """
         Whole genome calling option, acquire contig start end position from reference fasta index(.fai), then split the
-        reference accroding to chunk id and total chunk numbers.
+        reference according to chunk id and total chunk numbers.
         """
         contig_length = 0
         with open(fai_fn, 'r') as fai_fp:
@@ -295,17 +325,16 @@ def ExtractCandidates(args):
 
     hap_dict = defaultdict(int)
     pileup_dict = defaultdict(str)
-    # confident_bed_tree = bed_tree_from(bed_file_path=confident_bed_fn,
-    #                                    contig_name=ctg_name,
-    #                                    bed_ctg_start=extend_start,
-    #                                    bed_ctg_end=extend_end)
+    confident_bed_tree = bed_tree_from(bed_file_path=confident_bed_fn,
+                                       contig_name=ctg_name,
+                                       bed_ctg_start=extend_start,
+                                       bed_ctg_end=extend_end)
 
     extend_bed_tree = bed_tree_from(bed_file_path=extend_bed,
                                     contig_name=ctg_name,
                                     bed_ctg_start=extend_start,
                                     bed_ctg_end=extend_end)
-    rn_idx = -1
-    existed_read_names_dict = defaultdict(str)
+
     for row in samtools_mpileup_process.stdout:  # chr position N depth seq BQ read_name mapping_quality phasing_info
         columns = row.strip().split('\t')
         pos = int(columns[1])
@@ -325,7 +354,7 @@ def ExtractCandidates(args):
                                                             minimum_af_for_candidate=minimum_af_for_candidate)
 
         if phasing_info_in_bam:
-            phasing_info = columns[8].split(',')
+            phasing_info = columns[7].split(',')
             # add read name list size check in following steps
             if len(read_name_list) != len(phasing_info) or len(read_name_list) != len(base_list):
                 continue
@@ -335,14 +364,13 @@ def ExtractCandidates(args):
                         hap_dict[read_name_list[hap_idx]] = int(hap)
 
         if reference_base in 'ACGT' and (pass_af and depth >= min_coverage):
-            label_info,rn_idx = get_alt_info(center_pos=pos,
+            label_info = get_alt_info(center_pos=pos,
                                       base_list=base_list,
                                       read_name_list=read_name_list,
                                       reference_sequence=reference_sequence,
                                       reference_start=reference_start,
                                       hap_dict=hap_dict,
-                                      existed_read_names_dict=existed_read_names_dict,
-                                      rn_idx =rn_idx)
+                                      read_name_simplfier=read_name_simplfier)
             ru_fp.write('\t'.join([ctg_name + ' ' + str(pos), label_info]) + '\n')
 
     ru_fp.close()
