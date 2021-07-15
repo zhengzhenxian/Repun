@@ -41,27 +41,6 @@ class Reference(object):
     def query(self, start, end):
         return self.seq[start - self.start:end - self.start]
 
-
-def all_genotypes_combination(variant, alt_dict, variant_dict):
-    """
-    Enumerate true variant site and candidate site genotype combination and find read. For a phased confident site, we
-    only enumerate one genotype with confident flag.
-    """
-
-    if variant.type == 'candidate':
-        num_ref_and_alts = len(variant.variant.alternate_bases)
-
-        if variant.variant.start in alt_dict and alt_dict[variant.variant.start].phased_genotype:
-            return 1
-        elif variant.variant.start in alt_dict and alt_dict[variant.variant.start].confident_variant:
-            return 2
-        return (num_ref_and_alts + 1) * num_ref_and_alts / 2
-    else:
-        if variant.variant.start in alt_dict and alt_dict[
-            variant.variant.start].phased_genotype and variant.variant.start in variant_dict:
-            return 1
-        return len(variant.variant.alternate_bases)
-
 def unique_genotypes_selection(genotype_options):
     """
     Extend true two haplotypes according to the chosen genotype and only save the haplotype set with distinct haplotype,
@@ -590,7 +569,8 @@ def update_variant_hap_dict(alt_dict, pos, reference_sequence, reference_start, 
             phased_genotype[0] = alt_index + 1
         if hap_2_af >= 1 - allele_gap * 2:
             phased_genotype[1] = alt_index + 1
-
+    del alt_dict[pos].variant_hap_dict
+    del alt_dict[pos].hap_count_dict
     if -1 in phased_genotype:
         return None
     return phased_genotype
@@ -712,6 +692,121 @@ def check_confident_match(candidates, truths):
 #         split_partitions.append([candidate_partitions, truth_partitions])
 #     return split_partitions
 
+INFO = collections.namedtuple('INFO', ['start', 'type', 'variant'])
+class SplitVariants(object):
+    def __init__(self, truths,
+                 max_candidates_distance,
+                 max_calculate_count,
+                 partition_size,
+                 variant_dict=None):
+
+        self.max_candidates_distance = max_candidates_distance
+        self.max_calculate_count = max_calculate_count
+        self.partition_size = partition_size
+        self.truths = truths
+        self.product_count = 1
+        self.variant_dict = variant_dict
+        self.truths_pos_list = list(sorted([v.start for v in truths]))
+        self.truths_pos_set = set(self.truths_pos_list)
+        self.truth_index = 0
+        self.truth_start = self.truths_pos_list[0]
+        self.partition = []
+
+    def all_genotypes_combination(self, variant):
+        """
+        Enumerate true variant site and candidate site genotype combination and find read. For a phased confident site, we
+        only enumerate one genotype with confident flag.
+        """
+
+        if variant.type == 'candidate':
+            num_ref_and_alts = len(variant.variant.alternate_bases)
+            candidate = variant.variant
+            if candidate.phased_genotype:
+                return 1
+            elif candidate.confident_variant:
+                return 2
+            return (num_ref_and_alts + 1) * num_ref_and_alts / 2
+        else:
+            # if candidate.phased_genotype and candidate.start in self.variant_dict:
+            #     return 1
+            return len(variant.variant.alternate_bases)
+
+    def match_max_candidate_distance(self, variants, new_count):
+        if not len(self.partition):
+            return True
+        n_of_type = sum(1 for g in self.partition if g.type == variants.type)
+        if new_count >= max_calculate_count or n_of_type >= self.partition_size:
+            if new_count >= max_calculate_count:
+                print('{} exceed max calculation count'.format(new_count))
+            return False
+        else:
+            for g in self.partition:
+                if variants.variant.start - g.variant.end + 1 > self.max_candidates_distance:
+                    return False
+
+            last_par = self.partition[-1].variant.end
+            if variants.variant.start - last_par + 1 > extend_bp:
+                return False
+            return True
+
+    def merge_truth(self, candidate):
+        all_variants = []
+        candidate_start = candidate.start
+        if self.truth_start is None or candidate_start < self.truth_start:
+            all_variants.append(INFO(candidate.start, 'candidate', candidate))
+        elif self.truth_start is not None:
+            all_variants.append(INFO(candidate.start, 'truth', self.truths[self.truth_index]))
+            while candidate_start >= self.truth_start:
+                truth = self.truths[self.truth_index]
+                all_variants.append(INFO(truth.start, 'truth', truth))
+                if self.truth_index == len(self.truths_pos_list) - 1:
+                    all_variants.append(INFO(candidate.start, 'candidate', candidate))
+                    break
+                else:
+                    self.truth_index += 1
+                    self.truth_start = self.truths_pos_list[self.truth_index]
+        return all_variants
+
+    def split_truths_and_candidates(self, partition):
+        candidate_partitions = []
+        truth_partitions = []
+        for p in partition:
+            if p.type == 'candidate':
+                candidate_partitions.append(p.variant)
+            elif p.type == 'truth':
+                truth_partitions.append(p.variant)
+        return [candidate_partitions, truth_partitions]
+
+    def add_variant(self, candidate):
+        all_variants = self.merge_truth(candidate)
+        for variants in all_variants:
+            new_count = self.product_count * self.all_genotypes_combination(
+                variants)
+
+            if self.match_max_candidate_distance(variants,
+                                            new_count):
+                self.partition.append(variants)
+                self.product_count = new_count
+                return None
+            else:
+                if variants.start == self.partition[-1].start and variants.type != self.partition[
+                    -1].type:  #
+                    # add same truths or variants together and add at least one nearby candidate
+                    self.partition.append(variants)
+                    # if sv_idx < len(sorted_variants) - 1 and sorted_variants[sv_idx + 1].start not in truths_pos_set and \
+                    #         sorted_variants[sv_idx + 1].start - variants.start <= extend_bp:
+                    #     partition.append(sorted_variants[sv_idx + 1])
+                    partition = self.partition
+                    self.partition = []
+                    self.product_count = 1
+                    return self.split_truths_and_candidates(partition)
+
+                else:
+                    partition = self.partition
+                    self.partition = [variants]
+                    self.product_count = self.all_genotypes_combination(variants)
+                    return self.split_truths_and_candidates(partition)
+        return None
 
 def split_variants_truths(candidates,
                           truths,
@@ -936,15 +1031,15 @@ class RepresentationUnification(object):
         else:
             best_matches = sorted(matches, key=lambda x: x.match_order)[0]
             # print ('[INFO] Found match case:', best_matches.match_info())
-            output_seq = True
+            output_seq = False
             if output_seq:
                 candidate_genotypes = best_matches.candidate_genotypes
                 truth_genotypes = best_matches.truth_genotypes
                 candidate_seqs = find_read_support(candidates,ref, 'candidate', candidate_genotypes=candidate_genotypes, max_calculate_count=self.max_calculate_count,variant_dict=variant_dict, truths=truths, read_name_info_dict=read_name_info_dict,  alt_dict=alt_dict, output_seq=True)
                 truths_seqs = find_read_support(truths,ref, 'truth', candidate_genotypes=truth_genotypes, max_calculate_count=self.max_calculate_count,variant_dict=variant_dict, truths=truths, read_name_info_dict=read_name_info_dict,  alt_dict=alt_dict, output_seq=True)
                 # print (set(candidate_seqs) == set(truths_seqs))
-                update_candidate_seqs = set([item.replace('-', '').upper() for item in candidate_seqs])
-                update_truths_seqs = set([item.replace('-', '').upper() for item in truths_seqs])
+                # update_candidate_seqs = set([item.replace('-', '').upper() for item in candidate_seqs])
+                # update_truths_seqs = set([item.replace('-', '').upper() for item in truths_seqs])
                 # print('[INFO] match? ', set(update_candidate_seqs) == set(update_truths_seqs))
                 sorted_truths_seqs = truths_seqs if truths_seqs[0].replace('-', '').upper() ==  candidate_seqs[0].replace('-', '').upper() else truths_seqs[::-1]
                 output_info = [self.sample_name, self.contig_name, str(self.subsample_ratio), str(ref.start), str(ref.end), ref.seq, ','.join(candidate_seqs), ','.join(sorted_truths_seqs) ]
@@ -958,131 +1053,132 @@ class RepresentationUnification(object):
     def unify_label(self, variants, truths, ctg_start, ctg_end, all_pos, variant_dict,
                   rescue_dict=None, output_vcf_fn=None, read_name_info_dict=None, alt_dict=None):
 
-        all_partitions = split_variants_truths(
-            candidates=list(variants),
-            truths=list(truths),
-            partition_size=self.partition_size,
-            max_candidates_distance=self.max_candidates_distance,
-            max_calculate_count=self.max_calculate_count,
-            variant_dict=variant_dict,
-            alt_dict=alt_dict)
+        # all_partitions_generator = split_variants_truths(
+        #     candidates=list(variants),
+        #     truths=list(truths),
+        #     partition_size=self.partition_size,
+        #     max_candidates_distance=self.max_candidates_distance,
+        #     max_calculate_count=self.max_calculate_count,
+        #     variant_dict=variant_dict,
+        #     alt_dict=alt_dict)
+        all_candidates, all_truths = variants, truths
+        # for all_candidates, all_truths in all_partitions_generator:
+        #     partitions =
+        ref = self.get_reference_seq(all_candidates, all_truths)
+        match_pairs = self.find_match_pairs(candidates=all_candidates,
+                                            truths=all_truths,
+                                            ref=ref,
+                                            variant_dict=variant_dict,
+                                            read_name_info_dict=read_name_info_dict,
+                                            alt_dict=alt_dict)
 
-        for all_candidates, all_truths in all_partitions:
-            ref = self.get_reference_seq(all_candidates, all_truths)
-            match_pairs = self.find_match_pairs(candidates=all_candidates,
-                                                truths=all_truths,
-                                                ref=ref,
-                                                variant_dict=variant_dict,
-                                                read_name_info_dict=read_name_info_dict,
-                                                alt_dict=alt_dict)
-
-            if match_pairs is None:
-                if not len(truths):
-                    continue
-                # double check to rescue true variants
-                for truth in all_truths:
-                    pos = truth.start
-                # add missing low-confident tp position
-                    if not (pos >= ctg_start and pos < ctg_end):
-                        continue
-                    if pos in alt_dict and pos in variant_dict:
-                        ref_base = variant_dict[pos].reference_bases
-                        alt_base = variant_dict[pos].alternate_bases
-                        alt_list = alt_dict[pos].alt_list
-                        if not match_alt_base(alt_list, ref_base, alt_base):
-                            print('[INFO] {} {} miss and has no cigar support'.format(self.sample_ctg_info, pos))
-                            continue
-                        print('[INFO] {} {} miss by match, append to vcf'.format(self.sample_ctg_info, pos))
-                        if pos in all_pos or pos in rescue_dict:
-                            continue
-                        ref_base = variant_dict[pos].reference_bases
-                        variant = ','.join(variant_dict[pos].alternate_bases)
-                        genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
-                        # For efficiency, we currently only compute reference base, altnertive base and genotype from GetTruth.py
-                        rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                                self.contig_name,
-                                pos,
-                                ref_base,
-                                variant,
-                                10,
-                                'PASS',
-                                '.',
-                                genotype_string,
-                                10,
-                                10,
-                                0.5)
-                    else:
-                        print('[INFO] {} {} miss and no variant support'.format(self.sample_ctg_info, pos))
-                continue
-            for idx, (candidate, candidate_genotypes) in enumerate(
-                    zip(match_pairs.candidates, match_pairs.candidate_genotypes)):
-                pos = candidate.start
-
-                have_miss_variants = True if sum([1 for gt in match_pairs.truth_genotypes if sum(gt) == 0]) else False
-
-                # append a position into rescue queue if it was missed by the unification
-                if sum(candidate_genotypes) == 0 and pos not in rescue_dict and have_miss_variants and pos not in variant_dict and pos in alt_dict and alt_dict[pos].phased_genotype:
-                    genotype_string = '/'.join(map(str, alt_dict[pos].phased_genotype))
-                    variant = ','.join(candidate.alternate_bases)
-                    ref_base = candidate.reference_bases
-                    rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                        self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
-                    continue
-                if sum(candidate_genotypes) == 0:
-                    continue
-                if not len(candidate.alternate_bases):
-                    continue
-                g1, g2 = candidate_genotypes
-                variant = set()
-                ref_base = candidate.reference_bases
-                if g1 != 0:
-                    variant.add(candidate.alternate_bases[g1 - 1])
-                if g2 != 0:
-                    variant.add(candidate.alternate_bases[g2 - 1])
-                if g1 == 0 or g2 == 0:
-                    genotype_string = '0/1'
-                elif g1 == g2:
-                    genotype_string = '1/1'
-                elif g1 != g2:
-                    genotype_string = '1/2'
-                ref_base, variant = remove_common_suffix(ref_base, list(variant))
-                variant = ','.join(variant)
-                if candidate.start in all_pos:
-                    continue
-                all_pos.add(pos)
-
-                if output_vcf_fn is not None:
-                    # For efficiency, we only compute reference base, altnertive base and genotype for GetTruth.py currently
-                    print("%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                        self.contig_name, candidate.start, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5), file=output_vcf_fn)
-                    if pos in rescue_dict:
-                        del rescue_dict[pos]
-            for idx, (pos, raw_genotype, truth_genotype) in enumerate(
-                    zip(match_pairs.truths_pos_list, match_pairs.raw_genotypes,
-                        match_pairs.truth_genotypes)):
+        if match_pairs is None:
+            if not len(truths):
+                return
+            # double check to rescue true variants
+            for truth in all_truths:
+                pos = truth.start
+            # add missing low-confident tp position
                 if not (pos >= ctg_start and pos < ctg_end):
                     continue
+                if pos in alt_dict and pos in variant_dict:
+                    ref_base = variant_dict[pos].reference_bases
+                    alt_base = variant_dict[pos].alternate_bases
+                    alt_list = alt_dict[pos].alt_list
+                    if not match_alt_base(alt_list, ref_base, alt_base):
+                        print('[INFO] {} {} miss and has no cigar support'.format(self.sample_ctg_info, pos))
+                        continue
+                    print('[INFO] {} {} miss by match, append to vcf'.format(self.sample_ctg_info, pos))
+                    if pos in all_pos or pos in rescue_dict:
+                        continue
+                    ref_base = variant_dict[pos].reference_bases
+                    variant = ','.join(variant_dict[pos].alternate_bases)
+                    genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
+                    # For efficiency, we currently only compute reference base, altnertive base and genotype from GetTruth.py
+                    rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
+                            self.contig_name,
+                            pos,
+                            ref_base,
+                            variant,
+                            10,
+                            'PASS',
+                            '.',
+                            genotype_string,
+                            10,
+                            10,
+                            0.5)
+                else:
+                    print('[INFO] {} {} miss and no variant support'.format(self.sample_ctg_info, pos))
+            return
+        for idx, (candidate, candidate_genotypes) in enumerate(
+                zip(match_pairs.candidates, match_pairs.candidate_genotypes)):
+            pos = candidate.start
 
-                if truth_genotype == (0, 0) and sum(raw_genotype) > 0:# miss genoytpe
-                    if pos in alt_dict and pos in variant_dict:
-                        ref_base = variant_dict[pos].reference_bases
-                        alt_base = variant_dict[pos].alternate_bases
-                        alt_list = alt_dict[pos].alt_list
-                        if not match_alt_base(alt_list, ref_base, alt_base):
-                            print('{} {} miss and has no cigar support'.format(self.sample_ctg_info, pos))
-                            continue
-                        print('{} {} miss by match, append to vcf'.format(self.sample_ctg_info, pos))
-                        if pos in all_pos:
-                            continue
-                        all_pos.add(pos)
+            have_miss_variants = True if sum([1 for gt in match_pairs.truth_genotypes if sum(gt) == 0]) else False
 
-                        ref_base = variant_dict[pos].reference_bases
-                        variant = ','.join(variant_dict[pos].alternate_bases)
-                        genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
+            # append a position into rescue queue if it was missed by the unification
+            if sum(candidate_genotypes) == 0 and pos not in rescue_dict and have_miss_variants and pos not in variant_dict and pos in alt_dict and alt_dict[pos].phased_genotype:
+                genotype_string = '/'.join(map(str, alt_dict[pos].phased_genotype))
+                variant = ','.join(candidate.alternate_bases)
+                ref_base = candidate.reference_bases
+                rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
+                    self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
+                continue
+            if sum(candidate_genotypes) == 0:
+                continue
+            if not len(candidate.alternate_bases):
+                continue
+            g1, g2 = candidate_genotypes
+            variant = set()
+            ref_base = candidate.reference_bases
+            if g1 != 0:
+                variant.add(candidate.alternate_bases[g1 - 1])
+            if g2 != 0:
+                variant.add(candidate.alternate_bases[g2 - 1])
+            if g1 == 0 or g2 == 0:
+                genotype_string = '0/1'
+            elif g1 == g2:
+                genotype_string = '1/1'
+            elif g1 != g2:
+                genotype_string = '1/2'
+            ref_base, variant = remove_common_suffix(ref_base, list(variant))
+            variant = ','.join(variant)
+            if candidate.start in all_pos:
+                continue
+            all_pos.add(pos)
 
-                        if output_vcf_fn is not None:
-                            rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                                self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
+            if output_vcf_fn is not None:
+                # For efficiency, we only compute reference base, altnertive base and genotype for GetTruth.py currently
+                print("%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
+                    self.contig_name, candidate.start, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5), file=output_vcf_fn)
+                if pos in rescue_dict:
+                    del rescue_dict[pos]
+        for idx, (pos, raw_genotype, truth_genotype) in enumerate(
+                zip(match_pairs.truths_pos_list, match_pairs.raw_genotypes,
+                    match_pairs.truth_genotypes)):
+            if not (pos >= ctg_start and pos < ctg_end):
+                continue
+
+            if truth_genotype == (0, 0) and sum(raw_genotype) > 0:# miss genoytpe
+                if pos in alt_dict and pos in variant_dict:
+                    ref_base = variant_dict[pos].reference_bases
+                    alt_base = variant_dict[pos].alternate_bases
+                    alt_list = alt_dict[pos].alt_list
+                    if not match_alt_base(alt_list, ref_base, alt_base):
+                        print('{} {} miss and has no cigar support'.format(self.sample_ctg_info, pos))
+                        continue
+                    print('{} {} miss by match, append to vcf'.format(self.sample_ctg_info, pos))
+                    if pos in all_pos:
+                        continue
+                    all_pos.add(pos)
+
+                    ref_base = variant_dict[pos].reference_bases
+                    variant = ','.join(variant_dict[pos].alternate_bases)
+                    genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
+
+                    if output_vcf_fn is not None:
+                        rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
+                            self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
 
 
 def find_chunk_id(center_pos, chunk_num, ctg_name, fai_fn):
@@ -1182,35 +1278,6 @@ def UnifyRepresentation(args):
         ctg_start = chunk_size * chunk_id  # 0-base to 1-base
         ctg_end = ctg_start + chunk_size
 
-    # current_index = 0
-    # def extract_candidates_generator_from():
-
-    unzip_process = subprocess_popen(shlex.split("gzip -fdc %s" % (candidates_fn)))
-    for row in unzip_process.stdout:
-        row = row.strip().split('\t', maxsplit=2)  # ['chr_pos', 'depth', 'cigar_count']
-        chr_pos, depth, var_read_json = row[:3]
-        ctg_name, pos = chr_pos.split()
-        pos, depth = int(pos), int(depth)
-        if contig_name and contig_name != ctg_name:
-            continue
-        if pos < ctg_start - extended_window_size or pos > ctg_end + extended_window_size:
-            continue
-
-        candidate_details_list.append((pos, depth, var_read_json))
-
-    candidate_details_list = sorted(candidate_details_list, key=lambda x: x[0])
-
-    if not len(candidate_details_list):
-        return
-
-    # if ctg_start is None or ctg_end is None:
-    #     alt_start, alt_end = candidate_details_list[0][0], candidate_details_list[-1][0]
-    #     chunk_id = args.chunk_id - 1  # 1-base to 0-base
-    #     chunk_num = args.chunk_num
-    #     chunk_size = (alt_end - alt_start) // chunk_num + 1
-    #     ctg_start = alt_start + chunk_size * chunk_id
-    #     ctg_end = ctg_start + chunk_size
-
     is_ctg_name_given = contig_name is not None
     is_ctg_range_given = is_ctg_name_given and ctg_start is not None and ctg_end is not None
     ref_regions = []
@@ -1229,80 +1296,22 @@ def UnifyRepresentation(args):
         regions=ref_regions
     )
 
+    if is_confident_bed_file_given:
+        tree = bed_tree_from(bed_fn, contig_name=contig_name)
+
     vcf_reader = VcfReader(vcf_fn=vcf_fn, ctg_name=contig_name, ctg_start=ctg_start-extended_window_size, ctg_end=ctg_end+extended_window_size, is_var_format=True)
     vcf_reader.read_vcf()
     variant_dict = vcf_reader.variant_dict
-    for row in candidate_details_list:
-        pos, depth, var_read_json = row
 
-        if test_pos and (pos < test_pos - 1000 or pos > test_pos + 1000):
-            continue
-        var_read_dict = json.loads(var_read_json)
-        if not len(var_read_dict):
-            continue
+    truths = sorted([(item, variant_dict[item]) for item in variant_dict.keys() if
+                      is_region_in(
+                         tree=tree,
+                         contig_name=contig_name,
+                         region_start=item-2,
+                         region_end=variant_dict[item].end + 2)], key=lambda x: x[0])
+    truths = [item[1] for item in truths]
 
-        cigar_count = ' '.join([' '.join([item, str(len(var_read_dict[item].split(' ')))]) for item in var_read_dict.keys()])
-        ref_base = reference_sequence[pos - reference_start]
-        pos_in_truths = pos in variant_dict
-        ref_base, alt_base, alt_list = decode_alt_info(cigar_count=cigar_count,
-                                                               ref_base=ref_base,
-                                                               depth=depth,
-                                                               minimum_allele_gap=minimum_allele_gap)
-
-        alt_dict[pos] = Position(pos=pos,
-                                ref_base=ref_base,
-                                 alt_base=alt_base,
-                                 genotype1=-1,
-                                 genotype2=-1,
-                                 candidate=True,
-                                 depth=depth,
-                                 alt_list=alt_list)
-
-        for variant, read_str in var_read_dict.items():
-            read_list = read_str.split(' ')
-            for read_name in read_list:
-                read_name, hap = read_name[:-1], read_name[-1]
-                if read_name not in read_name_info_dict or read_name_info_dict[read_name].hap == 0 and hap != 0:
-                    read_name_info_dict[read_name].hap = int(hap)
-
-                read_hap = read_name_info_dict[read_name].hap if read_name in read_name_info_dict else 0
-                if read_hap in alt_dict[pos].variant_hap_dict[variant]:
-                    alt_dict[pos].variant_hap_dict[variant][read_hap] += 1
-                else:
-                    alt_dict[pos].variant_hap_dict[variant][read_hap] = 1
-                alt_dict[pos].hap_count_dict[read_hap] += 1
-                alt_dict[pos].read_name_set.add(read_name)
-                read_name_info_dict[read_name].pos_alt_dict[pos] = variant
-
-        match_index, is_variant_confident = lock_variant(alt_dict[pos], variant_dict[pos] if pos_in_truths else None)
-        if is_variant_confident:
-            variant_dict[pos].confident_variant = match_index
-        alt_dict[pos].phased_genotype = update_variant_hap_dict(alt_dict=alt_dict,
-                                                                pos=pos,
-                                                                reference_sequence=reference_sequence,
-                                                                reference_start=reference_start,
-                                                                is_variant_confident=is_variant_confident,
-                                                                variant_dict=variant_dict,
-                                                                allele_gap=minimum_allele_gap,
-                                                                platform=platform)
-
-        # lock the candidate if it has meet the phased_genotype requirement and have a exactly one match true variant site
-        if alt_dict[pos].phased_genotype and pos_in_truths and is_variant_confident:
-            if alt_dict[pos].phased_genotype.count(0) != variant_dict[pos].genotype.count(0) or (sum(variant_dict[pos].genotype) == 3 and sum(alt_dict[pos].phased_genotype) != 3):
-                # skip wrong genotype
-                alt_dict[pos].phased_genotype = None
-            variant_dict[pos].reference_bases = alt_dict[pos].reference_bases
-            variant_dict[pos].alternate_bases = alt_dict[pos].alternate_bases
-            variant_dict[pos].phased_genotype = alt_dict[pos].phased_genotype
-
-
-    if is_confident_bed_file_given:
-        tree = bed_tree_from(bed_fn, contig_name=contig_name)
-    # for read_name, read in read_name_info_dict.items():
-    #     if not len(read_name_info_dict[read_name].pos_alt_dict):
-    #         continue
-
-    if not len(alt_dict) or not len(variant_dict):
+    if not len(truths) or not len(variant_dict):
         return
 
     rescue_dict = defaultdict()
@@ -1319,24 +1328,6 @@ def UnifyRepresentation(args):
         max_candidates_distance = 200
         partition_size = 20
 
-    variants = sorted([(item, alt_dict[item]) for item in alt_dict.keys() if
-                        len(alt_dict[item].alternate_bases) and is_region_in(
-                           tree=tree,
-                           contig_name=contig_name,
-                           region_start=item-2,
-                           region_end=alt_dict[item].end + 2)], key=lambda x: x[0])
-    variants = [item[1] for item in variants]
-
-    truths = sorted([(item, variant_dict[item]) for item in variant_dict.keys() if
-                      is_region_in(
-                         tree=tree,
-                         contig_name=contig_name,
-                         region_start=item-2,
-                         region_end=variant_dict[item].end + 2)], key=lambda x: x[0])
-    truths = [item[1] for item in truths]
-
-    if not len(variants) and not len(truths):
-        return
 
     RU = RepresentationUnification(
         sample_name=sample_name,
@@ -1348,16 +1339,141 @@ def UnifyRepresentation(args):
         max_calculate_count=max_calculate_count,
         subsample_ratio=subsample_ratio)
 
-    RU.unify_label(variants=variants,
-                     truths=truths,
-                     ctg_start=ctg_start,
-                     ctg_end=ctg_end,
-                     all_pos=all_pos,
-                     variant_dict=variant_dict,
-                     rescue_dict=rescue_dict,
-                     output_vcf_fn=output_vcf_fn,
-                     read_name_info_dict=read_name_info_dict,
-                     alt_dict=alt_dict)
+    SP = SplitVariants(truths=truths,
+                 max_candidates_distance=max_candidates_distance,
+                 max_calculate_count=max_calculate_count,
+                 partition_size=partition_size,
+                 variant_dict=variant_dict)
+
+    def extract_candidates_generator_from():
+        unzip_process = subprocess_popen(shlex.split("gzip -fdc %s" % (candidates_fn)))
+        for row in unzip_process.stdout:
+            row = row.strip().split('\t', maxsplit=2)  # ['chr_pos', 'depth', 'cigar_count']
+            chr_pos, depth, var_read_json = row[:3]
+            ctg_name, pos = chr_pos.split()
+            pos, depth = int(pos), int(depth)
+            if contig_name and contig_name != ctg_name:
+                continue
+            if pos < ctg_start - extended_window_size or pos > ctg_end + extended_window_size:
+                continue
+
+            if test_pos and (pos < test_pos - 1000 or pos > test_pos + 1000):
+                continue
+            var_read_dict = json.loads(var_read_json)
+            if not len(var_read_dict):
+                continue
+
+            cigar_count = ' '.join([' '.join([item, str(len(var_read_dict[item].split(' ')))]) for item in var_read_dict.keys()])
+            ref_base = reference_sequence[pos - reference_start]
+            pos_in_truths = pos in variant_dict
+            ref_base, alt_base, alt_list = decode_alt_info(cigar_count=cigar_count,
+                                                                   ref_base=ref_base,
+                                                                   depth=depth,
+                                                                   minimum_allele_gap=minimum_allele_gap)
+
+            alt_dict[pos] = Position(pos=pos,
+                                    ref_base=ref_base,
+                                     alt_base=alt_base,
+                                     genotype1=-1,
+                                     genotype2=-1,
+                                     candidate=True,
+                                     depth=depth,
+                                     alt_list=alt_list)
+
+            for variant, read_str in var_read_dict.items():
+                read_list = read_str.split(' ')
+                for read_name in read_list:
+                    read_name, hap = read_name[:-1], read_name[-1]
+                    if read_name not in read_name_info_dict or read_name_info_dict[read_name].hap == 0 and hap != 0:
+                        read_name_info_dict[read_name].hap = int(hap)
+
+                    read_hap = read_name_info_dict[read_name].hap if read_name in read_name_info_dict else 0
+                    read_name_info_dict[read_name].pos_alt_dict[pos] = variant
+                    if read_hap in alt_dict[pos].variant_hap_dict[variant]:
+                        alt_dict[pos].variant_hap_dict[variant][read_hap] += 1
+                    else:
+                        alt_dict[pos].variant_hap_dict[variant][read_hap] = 1
+                    alt_dict[pos].hap_count_dict[read_hap] += 1
+                    alt_dict[pos].read_name_set.add(read_name)
+
+            match_index, is_variant_confident = lock_variant(alt_dict[pos], variant_dict[pos] if pos_in_truths else None)
+            if is_variant_confident:
+                variant_dict[pos].confident_variant = match_index
+            alt_dict[pos].phased_genotype = update_variant_hap_dict(alt_dict=alt_dict,
+                                                                    pos=pos,
+                                                                    reference_sequence=reference_sequence,
+                                                                    reference_start=reference_start,
+                                                                    is_variant_confident=is_variant_confident,
+                                                                    variant_dict=variant_dict,
+                                                                    allele_gap=minimum_allele_gap,
+                                                                    platform=platform)
+
+            # lock the candidate if it has meet the phased_genotype requirement and have a exactly one match true variant site
+            if alt_dict[pos].phased_genotype and pos_in_truths and is_variant_confident:
+                if alt_dict[pos].phased_genotype.count(0) != variant_dict[pos].genotype.count(0) or (sum(variant_dict[pos].genotype) == 3 and sum(alt_dict[pos].phased_genotype) != 3):
+                    # skip wrong genotype
+                    alt_dict[pos].phased_genotype = None
+                variant_dict[pos].reference_bases = alt_dict[pos].reference_bases
+                variant_dict[pos].alternate_bases = alt_dict[pos].alternate_bases
+                variant_dict[pos].phased_genotype = alt_dict[pos].phased_genotype
+
+            yield pos
+        yield None
+
+    candidates_reader = extract_candidates_generator_from()
+    while True:
+        pos = next(candidates_reader)
+        if pos is None:
+            break
+        partition = SP.add_variant(alt_dict[pos])
+
+        if partition is None:
+            continue
+        # print (len(partition[0]), len(partition[1]))
+        # continue
+    # for read_name, read in read_name_info_dict.items():
+    #     if not len(read_name_info_dict[read_name].pos_alt_dict):
+    #         continue
+    # variants = sorted([(item, alt_dict[item]) for item in alt_dict.keys() if
+    #                     len(alt_dict[item].alternate_bases) and is_region_in(
+    #                        tree=tree,
+    #                        contig_name=contig_name,
+    #                        region_start=item-2,
+    #                        region_end=alt_dict[item].end + 2)], key=lambda x: x[0])
+    # variants = [item[1] for item in variants]
+
+    # all_partitions_generator = split_variants_truths(
+    #     candidates=list(variants),
+    #     truths=list(truths),
+    #     partition_size=self.partition_size,
+    #     max_candidates_distance=max_candidates_distance,
+    #     max_calculate_count=max_calculate_count,
+    #     variant_dict=variant_dict,
+    #     alt_dict=alt_dict)
+        variants, truths = partition
+        RU.unify_label(variants=variants,
+                         truths=truths,
+                         ctg_start=ctg_start,
+                         ctg_end=ctg_end,
+                         all_pos=all_pos,
+                         variant_dict=variant_dict,
+                         rescue_dict=rescue_dict,
+                         output_vcf_fn=output_vcf_fn,
+                         read_name_info_dict=read_name_info_dict,
+                         alt_dict=alt_dict)
+
+        # empty dict
+        min_start = min(min([v.start for v in variants] if len(variants) else [0]), min([t.start for t in truths] if len(truths) else [0]))
+        for read_name in list(read_name_info_dict.keys()):
+            read = read_name_info_dict[read_name]
+            if read.end is not None and read.end < min_start:
+                del read_name_info_dict[read_name]
+
+        for pos in list(sorted(alt_dict.keys())):
+            if pos < min_start:
+                del alt_dict[pos]
+            else:
+                break
 
     if not len(rescue_dict):
         return
