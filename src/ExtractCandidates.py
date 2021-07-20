@@ -166,19 +166,20 @@ def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, refe
     reference_base = reference_sequence[center_pos - reference_start]
     alt_read_name_dict = defaultdict(set)
     depth = 0
+    simplfied_read_name_dict = defaultdict(str)
     for (base, indel), read_name in zip(base_list, read_name_list):
         if read_name in read_name_simplfier.existed_read_names_dict:
             simplfied_read_name = read_name_simplfier.existed_read_names_dict[read_name]
         else:
             simplfied_read_name = read_name_simplfier.simplfy_read_name()
             read_name_simplfier.existed_read_names_dict[read_name] = simplfied_read_name
-        read_name = simplfied_read_name
+        simplfied_read_name_dict[simplfied_read_name] = read_name
         if base in "#*":
             depth += 1
             continue
         depth += 1
         if base.upper() == reference_base and indel == '':
-            alt_read_name_dict['R'].add(read_name)
+            alt_read_name_dict['R'].add(simplfied_read_name)
         if indel != '':
             if indel[0] == '+':
                 indel = 'I' + base.upper() + indel.upper()[1:]
@@ -187,14 +188,14 @@ def get_alt_info(center_pos, base_list, read_name_list, reference_sequence, refe
                 del_ref_bases = reference_sequence[
                                 center_pos - reference_start + 1:center_pos - reference_start + del_bases_num + 1]
                 indel = 'D' + del_ref_bases
-            alt_read_name_dict[indel].add(read_name)
+            alt_read_name_dict[indel].add(simplfied_read_name)
 
         if indel == '' and base.upper() != reference_base:
-            alt_read_name_dict['X' + base.upper()].add(read_name)
+            alt_read_name_dict['X' + base.upper()].add(simplfied_read_name)
 
     for alt_type, read_name_set in list(alt_read_name_dict.items()):
         alt_read_name_dict[alt_type] = ' '.join(
-            [read_name + str(hap_dict[read_name]) for read_name in list(read_name_set)])
+            [simplfied_read_name + str(hap_dict[simplfied_read_name_dict[simplfied_read_name]]) for simplfied_read_name in list(read_name_set)])
 
     alt_info = str(depth) + '\t' + json.dumps(alt_read_name_dict)
 
@@ -232,17 +233,26 @@ def ExtractCandidates(args):
     unify_repre_fn = args.unify_repre_fn
     # global test_pos
     test_pos = None
-    # test_pos = None
-    if args.test_pos == 0 and test_pos:
+    test_pos = 32617141
+    if args.test_pos and test_pos:
+        platform ="hifi"
+        sample_name = 'hg002'
+        fasta_file_path = '/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta'
+        subsample_ratio = 1000
+        ctg_name="chr6"
+        ctg = ctg_name[3:]
         samtools_execute_command="/autofs/bal33/zxzheng/env/miniconda2/envs/clair2/bin/samtools"
-        bam_file_path = "/autofs/bal33/zxzheng/TMP/docker/myself/bam_alignment/HG002_35x_PacBio_14kb-15kb.bam"
+        bam_file_path="/autofs/bal33/zxzheng/data/phased_bam/{}/{}/{}_{}_{}.bam".format(platform, sample_name, sample_name, subsample_ratio, ctg)
         fasta_file_path = "/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta"
-        ctg_name = "chr20"
         chunk_num = 100
-        chunk_id = 1
-        platform = "ont"
-        extend_bed = ""
+        chunk_id = None
+        extend_bed = None
+        phasing_info_in_bam = True
         unify_repre_fn = "/autofs/bal33/zxzheng/TMP/tmp1"
+        ctg_start = test_pos - 1000
+        ctg_end = test_pos + 1000
+    else:
+        test_pos = None
     add_read_regions = True
 
     if platform == 'ilmn' and bam_file_path == "PIPE":
@@ -461,7 +471,7 @@ def main():
                         help=SUPPRESS)
 
     ## Test in specific candidate position. Only for testing
-    parser.add_argument('--test_pos', type=int, default=0,
+    parser.add_argument('--test_pos', type=str2bool, default=True,
                         help=SUPPRESS)
 
     ## The number of chucks to be divided into for parallel processing
