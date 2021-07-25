@@ -15,7 +15,7 @@ from shared.vcf import VcfReader
 import shared.param as param
 
 from shared.interval_tree import bed_tree_from, is_region_in
-from shared.utils import subprocess_popen, region_from, reference_sequence_from, Position as Position, output_header
+from shared.utils import subprocess_popen, region_from, reference_sequence_from, Position as Position, output_header, str2bool
 from src.utils import file_path_from
 extended_window_size = 200
 region_size = 50000
@@ -616,82 +616,6 @@ def check_confident_match(candidates, truths):
                     return False
     return True
 
-# def split_variants_truths(candidates,
-#                           truths,
-#                           partition_size,
-#                           max_candidates_distance,
-#                           max_calculate_count,
-#                           variant_dict=None,
-#                           alt_dict=None):
-#     """
-#     Split all candidate sites and true variant according to the start position, for true variant site, we extend the
-#     at least one candidate site in both two sides to aviod missing match.
-#     """
-#     INFO = collections.namedtuple('INFO', ['start', 'type', 'variant'])
-#     def match_max_candidate_distance(partition, variants, new_count):
-#         if not partition:
-#             return True
-#         n_of_type = sum(1 for g in partition if g.type == variants.type)
-#         if new_count >= max_calculate_count or n_of_type >= partition_size:
-#             if new_count >= max_calculate_count:
-#                 print('{} exceed max calculation count'.format(new_count))
-#             return False
-#         else:
-#             for g in partition:
-#                 if variants.variant.start - g.variant.end + 1 > max_candidates_distance:
-#                     return False
-#
-#             last_par = partition[-1].variant.end
-#             if variants.variant.start - last_par + 1 > extend_bp:
-#                 return False
-#             return True
-#
-#     truths_pos_set = set([v.start for v in truths])
-#     sorted_variants = list(heapq.merge(
-#         [INFO(v.start, 'candidate', v) for v in candidates],
-#         [INFO(t.start, 'truth', t) for t in truths]))
-#
-#     all_partitions = []
-#     partition = []
-#     product_count = 1
-#     for sv_idx in range(len(sorted_variants)):
-#         variants = sorted_variants[sv_idx]
-#         new_count = product_count * all_genotypes_combination(
-#             variants, variant_dict, alt_dict)
-#         if match_max_candidate_distance(partition, variants,
-#                                         new_count):
-#             partition.append(variants)
-#             product_count = new_count
-#         else:
-#             if variants.start == partition[-1].start and variants.type != partition[
-#                 -1].type:  #
-#                 # add same truths or variants together and add at least one nearby candidate
-#                 partition.append(variants)
-#                 if sv_idx < len(sorted_variants) - 1 and sorted_variants[sv_idx + 1].start not in truths_pos_set and \
-#                         sorted_variants[sv_idx + 1].start - variants.start <= extend_bp:
-#                     partition.append(sorted_variants[sv_idx + 1])
-#                 all_partitions.append(partition)
-#                 partition = []
-#                 product_count = 1
-#             else:
-#                 all_partitions.append(partition)
-#                 partition = [variants]
-#                 product_count = all_genotypes_combination(variants, variant_dict, alt_dict)
-#     if partition:
-#         all_partitions.append(partition)
-#
-#     split_partitions = []
-#     for partitions in all_partitions:
-#         candidate_partitions = []
-#         truth_partitions = []
-#         for p in partitions:
-#             if p.type == 'candidate':
-#                 candidate_partitions.append(p.variant)
-#             elif p.type == 'truth':
-#                 truth_partitions.append(p.variant)
-#         split_partitions.append([candidate_partitions, truth_partitions])
-#     return split_partitions
-
 INFO = collections.namedtuple('INFO', ['start', 'type', 'variant'])
 class SplitVariants(object):
     def __init__(self, truths,
@@ -727,8 +651,8 @@ class SplitVariants(object):
                 return 2
             return (num_ref_and_alts + 1) * num_ref_and_alts / 2
         else:
-            # if candidate.phased_genotype and candidate.start in self.variant_dict:
-            #     return 1
+            if variant.variant.phased_genotype is not None:
+                return 1
             return len(variant.variant.alternate_bases)
 
     def match_max_candidate_distance(self, variants, new_count):
@@ -777,9 +701,9 @@ class SplitVariants(object):
                 truth_partitions.append(p.variant)
         return [candidate_partitions, truth_partitions]
 
-    def add_variant(self, candidate):
-        all_variants = self.merge_truth(candidate)
-        for variants in all_variants:
+    def add_variant(self, truths_reader, candidates_reader):
+
+        for variants in heapq.merge(truths_reader, candidates_reader):
             new_count = self.product_count * self.all_genotypes_combination(
                 variants)
 
@@ -787,7 +711,6 @@ class SplitVariants(object):
                                             new_count):
                 self.partition.append(variants)
                 self.product_count = new_count
-                return None
             else:
                 if variants.start == self.partition[-1].start and variants.type != self.partition[
                     -1].type:  #
@@ -799,90 +722,14 @@ class SplitVariants(object):
                     partition = self.partition
                     self.partition = []
                     self.product_count = 1
-                    return self.split_truths_and_candidates(partition)
-
+                    yield self.split_truths_and_candidates(partition)
                 else:
                     partition = self.partition
                     self.partition = [variants]
                     self.product_count = self.all_genotypes_combination(variants)
-                    return self.split_truths_and_candidates(partition)
-        return None
-
-def split_variants_truths(candidates,
-                          truths,
-                          partition_size,
-                          max_candidates_distance,
-                          max_calculate_count,
-                          variant_dict=None,
-                          alt_dict=None):
-    """
-    Split all candidate sites and true variant according to the start position, for true variant site, we extend the
-    at least one candidate site in both two sides to aviod missing match.
-    """
-    INFO = collections.namedtuple('INFO', ['start', 'type', 'variant'])
-    def match_max_candidate_distance(partition, variants, new_count):
-        if not partition:
-            return True
-        n_of_type = sum(1 for g in partition if g.type == variants.type)
-        if new_count >= max_calculate_count or n_of_type >= partition_size:
-            if new_count >= max_calculate_count:
-                print('{} exceed max calculation count'.format(new_count))
-            return False
-        else:
-            for g in partition:
-                if variants.variant.start - g.variant.end + 1 > max_candidates_distance:
-                    return False
-
-            last_par = partition[-1].variant.end
-            if variants.variant.start - last_par + 1 > extend_bp:
-                return False
-            return True
-
-    truths_pos_set = set([v.start for v in truths])
-    sorted_variants = list(heapq.merge(
-        [INFO(v.start, 'candidate', v) for v in candidates],
-        [INFO(t.start, 'truth', t) for t in truths]))
-
-    all_partitions = []
-    partition = []
-    product_count = 1
-    for sv_idx in range(len(sorted_variants)):
-        variants = sorted_variants[sv_idx]
-        new_count = product_count * all_genotypes_combination(
-            variants, variant_dict, alt_dict)
-        if match_max_candidate_distance(partition, variants,
-                                        new_count):
-            partition.append(variants)
-            product_count = new_count
-        else:
-            if variants.start == partition[-1].start and variants.type != partition[
-                -1].type:  #
-                # add same truths or variants together and add at least one nearby candidate
-                partition.append(variants)
-                if sv_idx < len(sorted_variants) - 1 and sorted_variants[sv_idx + 1].start not in truths_pos_set and \
-                        sorted_variants[sv_idx + 1].start - variants.start <= extend_bp:
-                    partition.append(sorted_variants[sv_idx + 1])
-                all_partitions.append(partition)
-                partition = []
-                product_count = 1
-            else:
-                all_partitions.append(partition)
-                partition = [variants]
-                product_count = all_genotypes_combination(variants, variant_dict, alt_dict)
-    if partition:
-        all_partitions.append(partition)
-
-    split_partitions = []
-    for partitions in all_partitions:
-        candidate_partitions = []
-        truth_partitions = []
-        for p in partitions:
-            if p.type == 'candidate':
-                candidate_partitions.append(p.variant)
-            elif p.type == 'truth':
-                truth_partitions.append(p.variant)
-        split_partitions.append([candidate_partitions, truth_partitions])
-    return split_partitions
+                    yield self.split_truths_and_candidates(partition)
+        if len(self.partition):
+            yield self.split_truths_and_candidates(self.partition)
 
 class RepresentationUnification(object):
 
@@ -985,7 +832,7 @@ class RepresentationUnification(object):
         truths_genotypes_list = unique_genotypes_selection(truths_candidate_gentoypes)
         candidates_genotypes_list = unique_genotypes_selection(candidates_candidate_gentoypes)
 
-        print (len(truths_genotypes_list) * len(candidates_genotypes_list))
+        # print (len(truths_genotypes_list) * len(candidates_genotypes_list))
         if len(truths_genotypes_list) * len(candidates_genotypes_list) > self.max_calculate_count:
             return None
         variant_seqs, read_seqs_counter = find_read_support(
@@ -1053,17 +900,8 @@ class RepresentationUnification(object):
     def unify_label(self, variants, truths, ctg_start, ctg_end, all_pos, variant_dict,
                   rescue_dict=None, output_vcf_fn=None, read_name_info_dict=None, alt_dict=None):
 
-        # all_partitions_generator = split_variants_truths(
-        #     candidates=list(variants),
-        #     truths=list(truths),
-        #     partition_size=self.partition_size,
-        #     max_candidates_distance=self.max_candidates_distance,
-        #     max_calculate_count=self.max_calculate_count,
-        #     variant_dict=variant_dict,
-        #     alt_dict=alt_dict)
+
         all_candidates, all_truths = variants, truths
-        # for all_candidates, all_truths in all_partitions_generator:
-        #     partitions =
         ref = self.get_reference_seq(all_candidates, all_truths)
         match_pairs = self.find_match_pairs(candidates=all_candidates,
                                             truths=all_truths,
@@ -1102,7 +940,7 @@ class RepresentationUnification(object):
                             variant,
                             10,
                             'PASS',
-                            '.',
+                            'R',
                             genotype_string,
                             10,
                             10,
@@ -1122,7 +960,7 @@ class RepresentationUnification(object):
                 variant = ','.join(candidate.alternate_bases)
                 ref_base = candidate.reference_bases
                 rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                    self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
+                    self.contig_name, pos, ref_base, variant, 10, 'PASS', 'R', genotype_string, 10, 10, 0.5)
                 continue
             if sum(candidate_genotypes) == 0:
                 continue
@@ -1150,7 +988,7 @@ class RepresentationUnification(object):
             if output_vcf_fn is not None:
                 # For efficiency, we only compute reference base, altnertive base and genotype for GetTruth.py currently
                 print("%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                    self.contig_name, candidate.start, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5), file=output_vcf_fn)
+                    self.contig_name, candidate.start, ref_base, variant, 10, 'PASS', 'U', genotype_string, 10, 10, 0.5), file=output_vcf_fn)
                 if pos in rescue_dict:
                     del rescue_dict[pos]
         for idx, (pos, raw_genotype, truth_genotype) in enumerate(
@@ -1178,7 +1016,7 @@ class RepresentationUnification(object):
 
                     if output_vcf_fn is not None:
                         rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                            self.contig_name, pos, ref_base, variant, 10, 'PASS', '.', genotype_string, 10, 10, 0.5)
+                            self.contig_name, pos, ref_base, variant, 10, 'PASS', 'R', genotype_string, 10, 10, 0.5)
 
 
 def find_chunk_id(center_pos, chunk_num, ctg_name, fai_fn):
@@ -1234,27 +1072,30 @@ def UnifyRepresentation(args):
 
     global test_pos
     test_pos = None
-    # test_pos = 55549443
-    if args.test_pos == 0 and test_pos:
+    test_pos = 29703861
+    if args.test_pos and test_pos:
         platform ="hifi"
         sample_name = 'hg002'
         fasta_file_path = '/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta'
         subsample_ratio = 1000
         bed_fn = "/autofs/bal33/zxzheng/data/vcf/hg38/{}_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed".format(sample_name.upper())
         is_confident_bed_file_given = True
-        contig_name = 'chr20'
+        contig_name = 'chr6'
         # var_read_fn = '/autofs/bal33/zxzheng/pb/hap_labler/best_0/alt_info/hg002_1000_{}'.format(contig_name[3:])
         vcf_fn = '/autofs/bal33/zxzheng/data/var/{}/var_{}'.format(sample_name, contig_name[3:])
-        args.output_vcf = '/autofs/bal33/zxzheng/use_test/tmp_vcf'
+        args.output_vcf_fn = '/autofs/bal33/zxzheng/use_test/tmp_vcf'
         ctg_start = test_pos - 1000
         ctg_end = test_pos + 1000
         chunk_num = 50
         fai_fn = file_path_from(fasta_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
         chunk_id = find_chunk_id(center_pos=test_pos, chunk_num=50, ctg_name=contig_name, fai_fn=fai_fn)
-        candidates_fn = "/mnt/bal36/zxzheng/ru/{}/{}/candidates/{}_{}_{}_{}".format(platform, sample_name, sample_name, subsample_ratio, contig_name[3:], chunk_id+1)
 
+        candidates_fn = "/mnt/bal36/zxzheng/ru/{}/{}_{}/candidates/{}_{}_{}_{}".format(platform, sample_name, contig_name[3:], sample_name, subsample_ratio, contig_name[3:], chunk_id+1)
+        print ("candidate file {}".format(candidates_fn))
+        chunk_id = None
+    else:
+        test_pos = None
     alt_dict = defaultdict()
-    candidate_details_list = []
     read_name_info_dict = defaultdict(Read)
 
     fai_fn = file_path_from(fasta_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
@@ -1303,12 +1144,13 @@ def UnifyRepresentation(args):
     vcf_reader.read_vcf()
     variant_dict = vcf_reader.variant_dict
 
-    truths = sorted([(item, variant_dict[item]) for item in variant_dict.keys() if
-                      is_region_in(
-                         tree=tree,
-                         contig_name=contig_name,
-                         region_start=item-2,
-                         region_end=variant_dict[item].end + 2)], key=lambda x: x[0])
+    # truths = sorted([(item, variant_dict[item]) for item in variant_dict.keys() if
+    #                   is_region_in(
+    #                      tree=tree,
+    #                      contig_name=contig_name,
+    #                      region_start=item-2,
+    #                      region_end=variant_dict[item].end + 2)], key=lambda x: x[0])
+    truths = sorted([(item, variant_dict[item]) for item in variant_dict.keys()], key=lambda x: x[0])
     truths = [item[1] for item in truths]
 
     if not len(truths) or not len(variant_dict):
@@ -1327,7 +1169,6 @@ def UnifyRepresentation(args):
     if platform == 'hifi':
         max_candidates_distance = 200
         partition_size = 20
-
 
     RU = RepresentationUnification(
         sample_name=sample_name,
@@ -1417,40 +1258,18 @@ def UnifyRepresentation(args):
                 variant_dict[pos].alternate_bases = alt_dict[pos].alternate_bases
                 variant_dict[pos].phased_genotype = alt_dict[pos].phased_genotype
 
-            yield pos
-        yield None
+            yield INFO(pos, 'candidate', alt_dict[pos])
 
     candidates_reader = extract_candidates_generator_from()
-    while True:
-        pos = next(candidates_reader)
-        if pos is None:
-            break
-        partition = SP.add_variant(alt_dict[pos])
+    truths_reader = [INFO(t.start, 'truth', t) for t in truths]
 
+    for partition in SP.add_variant(truths_reader, candidates_reader):
+        # print (len(partition[0]), len(partition[1]))
         if partition is None:
             continue
-        # print (len(partition[0]), len(partition[1]))
-        # continue
-    # for read_name, read in read_name_info_dict.items():
-    #     if not len(read_name_info_dict[read_name].pos_alt_dict):
-    #         continue
-    # variants = sorted([(item, alt_dict[item]) for item in alt_dict.keys() if
-    #                     len(alt_dict[item].alternate_bases) and is_region_in(
-    #                        tree=tree,
-    #                        contig_name=contig_name,
-    #                        region_start=item-2,
-    #                        region_end=alt_dict[item].end + 2)], key=lambda x: x[0])
-    # variants = [item[1] for item in variants]
-
-    # all_partitions_generator = split_variants_truths(
-    #     candidates=list(variants),
-    #     truths=list(truths),
-    #     partition_size=self.partition_size,
-    #     max_candidates_distance=max_candidates_distance,
-    #     max_calculate_count=max_calculate_count,
-    #     variant_dict=variant_dict,
-    #     alt_dict=alt_dict)
         variants, truths = partition
+        if test_pos and (test_pos not in set([v.start for v in variants])) and (test_pos not in set([t.start for t in truths])):
+            continue
         RU.unify_label(variants=variants,
                          truths=truths,
                          ctg_start=ctg_start,
@@ -1541,7 +1360,7 @@ def main():
                         help=SUPPRESS)
 
     ## Test in specific candidate site. Only use for analysis
-    parser.add_argument('--test_pos', type=int, default=0,
+    parser.add_argument('--test_pos', type=str2bool, default=True,
                         help=SUPPRESS)
 
     ## The number of chucks to be divided into for parallel processing
