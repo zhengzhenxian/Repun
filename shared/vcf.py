@@ -14,7 +14,7 @@ class TruthStdout(object):
         self.stdin.close()
 
 class VcfReader(object):
-    def __init__(self, vcf_fn, ctg_name, ctg_start=None, ctg_end=None, is_var_format=True, is_happy_format=False):
+    def __init__(self, vcf_fn, ctg_name, ctg_start=None, ctg_end=None, is_var_format=True, is_happy_format=False, is_fp=None):
         self.vcf_fn = vcf_fn
         self.ctg_name = ctg_name
         self.ctg_start = ctg_start
@@ -22,6 +22,7 @@ class VcfReader(object):
         self.variant_dict = defaultdict(Position)
         self.is_var_format = is_var_format
         self.is_happy_format = is_happy_format
+        self.is_fp = is_fp
     def read_vcf(self):
         is_ctg_region_provided = self.ctg_start is not None and self.ctg_end is not None
 
@@ -47,7 +48,9 @@ class VcfReader(object):
             else:
                 reference, alternate, last_column = columns[3], columns[4], columns[-1]
             # normal GetTruth
-                if self.is_happy_format:
+                if self.is_happy_format and self.is_fp:
+                    last_column = columns[10]
+                if self.is_happy_format and not self.is_fp:
                     last_column = columns[9]
                 genotype = last_column.split(":")[0].replace("/", "|").replace(".", "0").split("|")
                 genotype_1, genotype_2 = genotype
@@ -68,10 +71,10 @@ class VcfReader(object):
                     genotype_1, genotype_2 = '0', '1'
             position = int(position)
             self.variant_dict[position] = Position(pos=position,
-                                         ref_base=reference,
-                                         alt_base=alternate,
-                                         genotype1=int(genotype_1),
-                                         genotype2=int(genotype_2))
+                                                    ref_base=reference,
+                                                   alt_base=alternate,
+                                                   genotype1=int(genotype_1),
+                                                   genotype2=int(genotype_2))
     def get_alt_info(self, pos, extra_info=""):
         pos = int(pos)
         if pos not in self.variant_dict:
