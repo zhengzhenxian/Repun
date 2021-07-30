@@ -233,26 +233,6 @@ def ExtractCandidates(args):
     unify_repre_fn = args.unify_repre_fn
     # global test_pos
     test_pos = None
-    test_pos = 32617141
-    if args.test_pos and test_pos:
-        platform ="hifi"
-        sample_name = 'hg002'
-        fasta_file_path = '/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta'
-        subsample_ratio = 1000
-        ctg_name="chr6"
-        ctg = ctg_name[3:]
-        samtools_execute_command="/autofs/bal33/zxzheng/env/miniconda2/envs/clair2/bin/samtools"
-        bam_file_path="/autofs/bal33/zxzheng/data/phased_bam/{}/{}/{}_{}_{}.bam".format(platform, sample_name, sample_name, subsample_ratio, ctg)
-        fasta_file_path = "/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta"
-        chunk_num = 100
-        chunk_id = None
-        extend_bed = None
-        phasing_info_in_bam = True
-        unify_repre_fn = "/autofs/bal33/zxzheng/TMP/tmp1"
-        ctg_start = test_pos - 1000
-        ctg_end = test_pos + 1000
-    else:
-        test_pos = None
     add_read_regions = True
 
     if platform == 'ilmn' and bam_file_path == "PIPE":
