@@ -1073,6 +1073,28 @@ def UnifyRepresentation(args):
     global test_pos
     test_pos = None
     test_pos = 29703861
+    if args.test_pos and test_pos:
+        platform ="hifi"
+        sample_name = 'hg002'
+        fasta_file_path = '/mnt/bal36/zxzheng/testData/ont/data/GRCh38_no_alt_analysis_set.fasta'
+        subsample_ratio = 1000
+        bed_fn = "/autofs/bal33/zxzheng/data/vcf/hg38/{}_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed".format(sample_name.upper())
+        is_confident_bed_file_given = True
+        contig_name = 'chr6'
+        # var_read_fn = '/autofs/bal33/zxzheng/pb/hap_labler/best_0/alt_info/hg002_1000_{}'.format(contig_name[3:])
+        vcf_fn = '/autofs/bal33/zxzheng/data/var/{}/var_{}'.format(sample_name, contig_name[3:])
+        args.output_vcf_fn = '/autofs/bal33/zxzheng/use_test/tmp_vcf'
+        ctg_start = test_pos - 1000
+        ctg_end = test_pos + 1000
+        chunk_num = 50
+        fai_fn = file_path_from(fasta_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
+        chunk_id = find_chunk_id(center_pos=test_pos, chunk_num=50, ctg_name=contig_name, fai_fn=fai_fn)
+
+        candidates_fn = "/mnt/bal36/zxzheng/ru/{}/{}_{}/candidates/{}_{}_{}_{}".format(platform, sample_name, contig_name[3:], sample_name, subsample_ratio, contig_name[3:], chunk_id+1)
+        print ("candidate file {}".format(candidates_fn))
+        chunk_id = None
+    else:
+        test_pos = None
     alt_dict = defaultdict()
     read_name_info_dict = defaultdict(Read)
 
