@@ -219,12 +219,29 @@ def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, 
         elif len(key) > 1 and key[1] == '-':
             pileup_dict['D'] += count
 
+    minimum_snp_af_for_candidate = minimum_snp_af_for_candidate if minimum_snp_af_for_candidate > 0 else param.min_af
+    minimum_indel_af_for_candidate = minimum_indel_af_for_candidate if minimum_indel_af_for_candidate > 0 else param.min_af_dict[platform]
+
     denominator = depth if depth > 0 else 1
     pileup_list = sorted(list(pileup_dict.items()), key=lambda x: x[1], reverse=True)
+
+    pass_af = len(pileup_list) and (pileup_list[0][0] != reference_base)
+    pass_snp_af = False
+    pass_indel_af = False
+
+    for item, count in pileup_list:
+        if item == reference_base:
+            continue
+        elif item[0] in 'ID':
+            pass_indel_af = (pass_indel_af or (float(count) / denominator >= minimum_indel_af_for_candidate))
+            continue
+        pass_snp_af = pass_snp_af or (float(count) / denominator >= minimum_snp_af_for_candidate)
+
     af = (float(pileup_list[1][1]) / denominator) if len(pileup_list) > 1 else 0.0
-    pass_af = len(pileup_list) and (pileup_list[0][0] != reference_base or af >= minimum_af_for_candidate)
     af = (float(pileup_list[0][1]) / denominator) if len(pileup_list) >= 1 and pileup_list[0][
         0] != reference_base else af
+
+    pass_af = pass_af or pass_snp_af or pass_indel_af
 
     return base_list, depth, pass_af, af
 
@@ -438,9 +455,12 @@ def CreateTensorFullAlignment(args):
     extend_bp = param.extend_bp
     unify_repre = args.unify_repre
     minimum_af_for_candidate = args.min_af
+    minimum_snp_af_for_candidate = args.snp_min_af
+    minimum_indel_af_for_candidate = args.indel_min_af
     min_coverage = args.minCoverage
     platform = args.platform
     confident_bed_fn = args.bed_fn
+    is_confident_bed_file_given = confident_bed_fn is not None
     phased_vcf_fn = args.phased_vcf_fn
     alt_fn = args.indel_fn
     extend_bed = args.extend_bed
@@ -666,6 +686,8 @@ def CreateTensorFullAlignment(args):
             base_list, depth, pass_af, af = decode_pileup_bases(pileup_bases=pileup_bases,
                                                                 reference_base=reference_base,
                                                                 minimum_af_for_candidate=minimum_af_for_candidate,
+                                                                minimum_snp_af_for_candidate=minimum_snp_af_for_candidate,
+                                                                minimum_indel_af_for_candidate=minimum_indel_af_for_candidate,
                                                                 has_pileup_candidates=has_pileup_candidates)
 
             if phasing_info_in_bam:
@@ -856,6 +878,12 @@ def main():
     parser.add_argument('--min_af', type=float, default=0.08,
                         help="Minimum allele frequency for both SNP and Indel for a site to be considered as a condidate site, default: %(default)f")
 
+    parser.add_argument('--snp_min_af', type=float, default=0.08,
+                        help="Minimum snp allele frequency for a site to be considered as a candidate site, default: %(default)f")
+
+    parser.add_argument('--indel_min_af', type=float, default=0.15,
+                        help="Minimum indel allele frequency for a site to be considered as a candidate site, default: %(default)f")
+
     parser.add_argument('--ctgName', type=str, default=None,
                         help="The name of sequence to be processed, required if --bed_fn is not defined")
 
@@ -956,7 +984,6 @@ def main():
     ## Apply read realignment for illumina platform. Greatly boost indel performance in trade of running time
     parser.add_argument('--need_realignment', action='store_true',
                         help=SUPPRESS)
-
 
 
     args = parser.parse_args()
