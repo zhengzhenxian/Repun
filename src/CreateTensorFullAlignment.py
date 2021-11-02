@@ -169,7 +169,7 @@ def get_tensor_info(base_info, bq, ref_base, read_mq):
     return read_channel, ins_base, query_base
 
 
-def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, has_pileup_candidates):
+def decode_pileup_bases(pileup_bases, reference_base, minimum_af_for_candidate, minimum_snp_af_for_candidate, minimum_indel_af_for_candidate, has_pileup_candidates, platform='ont'):
     """
     Decode mpileup input string.
     pileup_bases: pileup base string for each position, include all mapping information.
@@ -511,18 +511,29 @@ def CreateTensorFullAlignment(args):
         Whole genome calling option, acquire contig start end position from reference fasta index(.fai), then split the
         reference accroding to chunk id and total chunk numbers.
         """
-        contig_length = 0
-        with open(fai_fn, 'r') as fai_fp:
-            for row in fai_fp:
-                columns = row.strip().split("\t")
+        if is_confident_bed_file_given:
+            # consistent with pileup generation, faster to extract tensor using bed region
+            tree, bed_start, bed_end = bed_tree_from(bed_file_path=extend_bed,
+                                                     contig_name=ctg_name,
+                                                     return_bed_region=True)
 
-                contig_name = columns[0]
-                if contig_name != ctg_name:
-                    continue
-                contig_length = int(columns[1])
-        chunk_size = contig_length // chunk_num + 1 if contig_length % chunk_num else contig_length // chunk_num
-        ctg_start = chunk_size * chunk_id  # 0-base to 1-base
-        ctg_end = ctg_start + chunk_size
+            chunk_size = (bed_end - bed_start) // chunk_num + 1 if (bed_end - bed_start) % chunk_num else (
+                                                                                                                      bed_end - bed_start) // chunk_num
+            ctg_start = bed_start + 1 + chunk_size * chunk_id  # 0-base to 1-base
+            ctg_end = ctg_start + chunk_size
+        else:
+            contig_length = 0
+            with open(fai_fn, 'r') as fai_fp:
+                for row in fai_fp:
+                    columns = row.strip().split("\t")
+
+                    contig_name = columns[0]
+                    if contig_name != ctg_name:
+                        continue
+                    contig_length = int(columns[1])
+            chunk_size = contig_length // chunk_num + 1 if contig_length % chunk_num else contig_length // chunk_num
+            ctg_start = chunk_size * chunk_id  # 0-base to 1-base
+            ctg_end = ctg_start + chunk_size
 
         # for illumina platform, the reads alignment is acquired after reads realignment from ReadsRealign.py
         if platform == 'ilmn' and bam_file_path != "PIPE":
