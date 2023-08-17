@@ -189,23 +189,30 @@ class VcfReader(object):
                     last_column = columns[10]
                 if self.is_happy_format and not self.is_fp:
                     last_column = columns[9]
-                genotype = last_column.split(":")[0].replace("/", "|").replace(".", "0").split("|")
-                genotype_1, genotype_2 = genotype
+                try:
+                    genotype = last_column.split(":")[0].replace("/", "|").replace(".", "0").split("|")
+                    if len(genotype) == 1:
+                        genotype_1 = genotype[0]
+                        genotype_2 = 3
+                    else:
+                        genotype_1, genotype_2 = genotype
 
-                # 1000 Genome GetTruth (format problem) (no genotype is given)
-                if int(genotype_1) > int(genotype_2):
-                    genotype_1, genotype_2 = genotype_2, genotype_1
+                    # 1000 Genome GetTruth (format problem) (no genotype is given)
+                    if int(genotype_1) > int(genotype_2):
+                        genotype_1, genotype_2 = genotype_2, genotype_1
 
-                #remove * to guarentee vcf match
-                if '*' in alternate:
-                    alternate = alternate.split(',')
-                    if int(genotype_1) + int(genotype_2) != 3 or len(alternate) != 2:
-                        print ('error with variant representation')
-                        continue
-                    alternate = ''.join([alt_base for alt_base in alternate if alt_base != '*'])
-                    # * always have a genotype 1/2
+                    #remove * to guarentee vcf match
+                    if '*' in alternate:
+                        alternate = alternate.split(',')
+                        if int(genotype_1) + int(genotype_2) != 3 or len(alternate) != 2:
+                            print ('error with variant representation')
+                            continue
+                        alternate = ''.join([alt_base for alt_base in alternate if alt_base != '*'])
+                        # * always have a genotype 1/2
 
-                    genotype_1, genotype_2 = '0', '1'
+                        genotype_1, genotype_2 = '0', '1'
+                except:
+                    genotype_1, genotype_2 = '0', '0'
             position = int(position)
             self.variant_dict[position] = Position(pos=position,
                                                     ref_base=reference,
