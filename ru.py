@@ -3,7 +3,7 @@ from importlib import import_module
 
 DATA_PREP_SCRIPTS_FOLDER="src"
 DEEP_LEARNING_FOLDER="ru"
-POST_PROCESS_SCRIPTS_FOLDER="clair3.metrics"
+POST_PROCESS_SCRIPTS_FOLDER="metrics"
 
 deep_learning_folder = [
     "CallVarBam",
@@ -18,7 +18,8 @@ data_preprocess_folder = [
     "UnifyRepresentation",
     'VcfReader',
     "SortVcf",
-    "PlotAlignment"
+    "PlotAlignment",
+    "GetTruth"
 ]
 
 post_process_scripts_folder = [
