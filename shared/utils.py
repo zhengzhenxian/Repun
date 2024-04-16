@@ -23,6 +23,22 @@ from os.path import isfile, isdir
 # D->A or G or T
 # H->A or C or T
 # V->A or C or G
+
+def convert_iupac_to_n(string):
+    if string == ".":
+        return string
+    output_str = []
+    not_acgt_count = 0
+    for s in string:
+        if s.upper() not in "ACGTN,.":
+            not_acgt_count += 1
+            output_str.append('N')
+        else:
+            output_str.append(s)
+    if not_acgt_count == 0:
+        return string
+    return ''.join(output_str)
+
 IUPAC_base_to_ACGT_base_dict = dict(zip(
     "ACGTURYSWKMBDHVN",
     ("A", "C", "G", "T", "T", "A", "C", "C", "A", "G", "A", "C", "A", "A", "A", "A")
@@ -110,6 +126,13 @@ def executable_command_string_from(command_to_execute, exit_on_not_found=False):
 def subprocess_popen(args, stdin=None, stdout=PIPE, stderr=stderr, bufsize=8388608):
     return Popen(args, stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, universal_newlines=True)
 
+def str_none(v):
+    if v is None:
+        return None
+    if v.upper() == "NONE":
+        return None
+    if isinstance(v, str):
+        return v
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -226,6 +249,76 @@ def samtools_view_process_from(
     return subprocess_popen(
         shlex.split("%s view -F 2318 %s %s" % (samtools, bam_file_path, region_str))
     )
+
+
+
+def get_header(reference_file_path=None, cmd_fn=None, sample_name="SAMPLE", version='1.0.4', gvcf=False):
+    from textwrap import dedent
+
+    if reference_file_path is None or not os.path.exists(reference_file_path):
+        ref_header_str = ""
+    else:
+        ref_header_str = "##reference={}".format(reference_file_path)
+
+    cmdline_str = ""
+    if cmd_fn is not None and os.path.exists(cmd_fn):
+            cmd_line = open(cmd_fn).read().rstrip()
+
+            if cmd_line is not None and len(cmd_line) > 0:
+                cmdline_str = "##cmdline={}".format(cmd_line)
+
+    if gvcf:
+        header = dedent("""\
+            ##fileformat=VCFv4.2
+            ##source=Clair3
+            ##clair3_version={}
+            ##FILTER=<ID=PASS,Description="All filters passed">
+            ##FILTER=<ID=LowQual,Description="Low quality variant">
+            ##FILTER=<ID=RefCall,Description="Reference call">
+            ##INFO=<ID=P,Number=0,Type=Flag,Description="Result from pileup calling">
+            ##INFO=<ID=F,Number=0,Type=Flag,Description="Result from full-alignment calling">
+            ##ALT=<ID=NON_REF,Description="Represents any possible alternative allele at this location">
+            ##INFO=<ID=END,Number=1,Type=Integer,Description="End position (for use with symbolic alleles)">
+            ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+            ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+            ##INFO=<ID=U,Number=0,Type=Flag,Description="Result from unified match">
+            ##INFO=<ID=R,Number=0,Type=Flag,Description="Result from rescue candidates">
+            ##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth (reads with MQ<20 or selected by 'samtools view -F 2316' are filtered)">
+            ##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">
+            ##FORMAT=<ID=MIN_DP,Number=1,Type=Integer,Description="Minimum DP observed within the GVCF block">
+            ##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Normalized, Phred-scaled likelihoods for genotypes as defined in the VCF specification">
+            ##FORMAT=<ID=AF,Number=1,Type=Float,Description="Observed allele frequency in reads, for each ALT allele, in the same order as listed, or the REF allele for a RefCall">\n""".format(
+            version))
+    else:
+        header = dedent("""\
+            ##fileformat=VCFv4.2
+            ##source=Clair3
+            ##clair3_version={}
+            ##FILTER=<ID=PASS,Description="All filters passed">
+            ##FILTER=<ID=LowQual,Description="Low quality variant">
+            ##FILTER=<ID=RefCall,Description="Reference call">
+            ##INFO=<ID=P,Number=0,Type=Flag,Description="Result from pileup calling">
+            ##INFO=<ID=F,Number=0,Type=Flag,Description="Result from full-alignment calling">
+            ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+            ##INFO=<ID=U,Number=0,Type=Flag,Description="Result from unified match">
+            ##INFO=<ID=R,Number=0,Type=Flag,Description="Result from rescue candidates">
+            ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+            ##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Approximate read depth (reads with MQ<20 or selected by 'samtools view -F 2316' are filtered)">
+            ##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">
+            ##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Normalized, Phred-scaled likelihoods for genotypes as defined in the VCF specification">
+            ##FORMAT=<ID=AF,Number=1,Type=Float,Description="Observed allele frequency in reads, for each ALT allele, in the same order as listed, or the REF allele for a RefCall">\n""".format(
+            version))
+    if ref_header_str != "":
+        header_list = header.rstrip('\n').split('\n')
+        insert_index = 3 if len(header_list) >= 3 else len(header_list) - 1
+        header_list.insert(insert_index, ref_header_str)
+        header = "\n".join(header_list) + '\n'
+
+    if cmdline_str != "":
+        header_list = header.rstrip('\n').split('\n')
+        insert_index = 3 if len(header_list) >= 3 else len(header_list) - 1
+        header_list.insert(insert_index, cmdline_str)
+        header = "\n".join(header_list) + '\n'
 
 class Position(object):
     def __init__(self, genotype1, genotype2, pos=None,ref_base=None, alt_base=None, candidate=False, cigar_count=None,
