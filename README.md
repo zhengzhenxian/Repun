@@ -43,6 +43,23 @@ docker run -it \
   --platform ${PLATFORM} \                 ## options: {ont, hifi, ilmn}
   --output_dir ${OUTPUT_DIR}               ## output path prefix 
 ```
+### Option 2. Docker Dockerfile
+
+This is the same as option 1 except that you are building a docker image yourself. Please refer to option 1 for usage. 
+
+```bash
+# clone the repo
+git clone https://github.com/zhengzhenxian/ru.git
+cd ru
+
+# build a docker image named hkubal/ru:latest
+# might require docker authentication to build docker image 
+docker build -f ./Dockerfile -t hkubal/ru:latest .
+
+# run the docker image like option 1
+docker run -it hkubal/ru:latest /opt/bin/ru --help
+```
+
 
 Check [Usage](#Usage) for more options.
 
