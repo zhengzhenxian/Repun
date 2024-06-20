@@ -654,7 +654,7 @@ def ru(args):
     seb_command += ' --joblog ' + args.output_dir + '/logs/parallel_3_split_extend_bed.log'
     seb_command += ' -j ' + str(args.threads)
     seb_command += ' ' + args.pypy + ' ' + main_entry + ' SplitExtendBed'
-    seb_command += '--bed_fn {}'.format(args.bed_fn) if args.bed_fn is not None else ''
+    seb_command += ' --bed_fn {}'.format(args.bed_fn) if args.bed_fn is not None else ''
     seb_command += ' --ctgName {1}'
     seb_command += ' --output_fn ' + args.output_dir + '/tmp/split_beds/{1}'
     seb_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'

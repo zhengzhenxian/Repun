@@ -74,7 +74,3 @@ RUN /bin/bash -c "source activate ru" && \
     echo "source activate ru" > ~/.bashrc
 
 COPY . .
-
-RUN cd /opt/bin && \
-    make PREFIX=/opt/conda/envs/ru PYTHON=/opt/conda/envs/ru/bin/python && \
-    rm -rf /opt/bin/samtools-*
