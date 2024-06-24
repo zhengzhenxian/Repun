@@ -587,66 +587,67 @@ def ru(args):
     except subprocess.CalledProcessError as e:
         time = ''
 
-    # RU
-    # STEP 1: Whatshap UnPhasing
-    echo_list.append("[INFO] STEP {}: Whatshap UnPhasing".format(step))
-    step += 1
-    wu_command = args.whatshap + ' unphase {} > {}'.format(args.truth_vcf_fn, args.output_dir + '/tmp/INPUT.vcf.gz')
-    commands_list += [wu_command]
+    if not args.disable_phasing:
+        # RU
+        # STEP 1: Whatshap UnPhasing
+        echo_list.append("[INFO] STEP {}: Whatshap UnPhasing".format(step))
+        step += 1
+        wu_command = args.whatshap + ' unphase {} > {}'.format(args.truth_vcf_fn, args.output_dir + '/tmp/INPUT.vcf.gz')
+        commands_list += [wu_command]
 
-    # STEP 2: Whatshap Phasing
-    echo_list.append("[INFO] STEP {}: Whatshap Phasing INPUT VCF file".format(step))
-    step += 1
-    wp_command = '( ' + time + args.parallel
-    wp_command += ' --joblog ' + args.output_dir + '/logs/parallel_1_phase.log'
-    wp_command += ' -j ' + str(args.threads)
-    wp_command += ' ' + args.whatshap + ' phase'
-    wp_command += ' --output ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
-    wp_command += ' --reference ' + args.ref_fn
-    wp_command += ' --chromosome {1}'
-    wp_command += ' --ignore-read-groups'
-    wp_command += ' --distrust-genotypes'
-    wp_command += ' ' + args.output_dir + '/tmp/INPUT.vcf.gz'
-    wp_command += ' ' + args.bam_fn
-    wp_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
-    wp_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/1_WP.log'
-    commands_list += [wp_command]
+        # STEP 2: Whatshap Phasing
+        echo_list.append("[INFO] STEP {}: Whatshap Phasing INPUT VCF file".format(step))
+        step += 1
+        wp_command = '( ' + time + args.parallel
+        wp_command += ' --joblog ' + args.output_dir + '/logs/parallel_1_phase.log'
+        wp_command += ' -j ' + str(args.threads)
+        wp_command += ' ' + args.whatshap + ' phase'
+        wp_command += ' --output ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
+        wp_command += ' --reference ' + args.ref_fn
+        wp_command += ' --chromosome {1}'
+        wp_command += ' --ignore-read-groups'
+        wp_command += ' --distrust-genotypes'
+        wp_command += ' ' + args.output_dir + '/tmp/INPUT.vcf.gz'
+        wp_command += ' ' + args.bam_fn
+        wp_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+        wp_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/1_WP.log'
+        commands_list += [wp_command]
 
-    # STEP 3: Index VCF
-    echo_list.append("[INFO] STEP {}: Index VCF file".format(step))
-    step += 1
-    tabix_input_command = args.parallel + ' -j ' + str(args.threads)
-    tabix_input_command += ' tabix' + ' -f -p vcf'
-    tabix_input_command += ' ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
-    tabix_input_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
-    commands_list.append(tabix_input_command)
+        # STEP 3: Index VCF
+        echo_list.append("[INFO] STEP {}: Index VCF file".format(step))
+        step += 1
+        tabix_input_command = args.parallel + ' -j ' + str(args.threads)
+        tabix_input_command += ' tabix' + ' -f -p vcf'
+        tabix_input_command += ' ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
+        tabix_input_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+        commands_list.append(tabix_input_command)
 
-    # STEP 4: Whatshap Haplotagging
-    echo_list.append("[INFO] STEP {}: Whatshap Haplotagging BAM file".format(step))
-    step += 1
-    wh_command = '( ' + time + args.parallel
-    wh_command += ' --joblog ' + args.output_dir + '/logs/parallel_2_haplotag.log'
-    wh_command += ' -j ' + str(args.threads)
-    wh_command += ' ' + args.whatshap + ' haplotag'
-    wh_command += ' --output ' + args.output_dir + '/tmp/phased_bam/{2}_{1}.bam'
-    wh_command += ' --reference ' + args.ref_fn
-    wh_command += ' --regions {1}'
-    wh_command += ' --ignore-read-groups'
-    wh_command += ' ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
-    wh_command += ' ' + args.bam_fn
-    wh_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
-    wh_command += ' ::: ' + args.sample_name
-    wh_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/2_WH.log'
+        # STEP 4: Whatshap Haplotagging
+        echo_list.append("[INFO] STEP {}: Whatshap Haplotagging BAM file".format(step))
+        step += 1
+        wh_command = '( ' + time + args.parallel
+        wh_command += ' --joblog ' + args.output_dir + '/logs/parallel_2_haplotag.log'
+        wh_command += ' -j ' + str(args.threads)
+        wh_command += ' ' + args.whatshap + ' haplotag'
+        wh_command += ' --output ' + args.output_dir + '/tmp/phased_bam/{2}_{1}.bam'
+        wh_command += ' --reference ' + args.ref_fn
+        wh_command += ' --regions {1}'
+        wh_command += ' --ignore-read-groups'
+        wh_command += ' ' + args.output_dir + '/tmp/phased_vcf/phased_{1}.vcf.gz'
+        wh_command += ' ' + args.bam_fn
+        wh_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+        wh_command += ' ::: ' + args.sample_name
+        wh_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/2_WH.log'
 
-    index_command = args.parallel + ' -j ' + str(args.threads)
-    index_command += ' ' + args.samtools + ' index '
-    index_command += ' -@' + str(args.threads)
-    index_command += ' ' + args.output_dir + '/tmp/phased_bam/{2}_{1}.bam'
-    index_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
-    index_command += ' ::: ' + args.sample_name
+        index_command = args.parallel + ' -j ' + str(args.threads)
+        index_command += ' ' + args.samtools + ' index '
+        index_command += ' -@' + str(args.threads)
+        index_command += ' ' + args.output_dir + '/tmp/phased_bam/{2}_{1}.bam'
+        index_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+        index_command += ' ::: ' + args.sample_name
 
-    commands_list.append(wh_command + ' && ' + index_command)
-
+        commands_list.append(wh_command + ' && ' + index_command)
+        
     # STEP 5: Split bed file regions according to the contig name and extend bed region
     echo_list.append("[INFO] STEP {}: Split bed file regions according to the contig name and extend bed region".format(step))
     step += 1
@@ -682,7 +683,7 @@ def ru(args):
     ec_command += ' --joblog ' + args.output_dir + '/logs/parallel_5_extract_candidates.log'
     ec_command += ' -C " " -j ' + str(args.threads)
     ec_command += ' ' + args.pypy + ' ' + main_entry + ' ExtractCandidates'
-    ec_command += ' --bam_fn ' + args.output_dir + '/tmp/phased_bam/{4}_{1}.bam'
+    ec_command += ' --bam_fn ' + ((args.output_dir + '/tmp/phased_bam/{4}_{1}.bam') if not args.disable_phasing else args.bam_fn)
     ec_command += ' --ref_fn ' + args.ref_fn
     ec_command += ' --ctgName {1}'
     ec_command += ' --samtools ' + args.samtools
@@ -933,7 +934,7 @@ def ru_parser():
     optional_params.add_argument(
         "--disable_phasing",
         action='store_true',
-        help="Disable phasing with whatshap."
+        help="Disable phasing with whatshap. Work with the haplotagged BAM to speed up unification"
     )
 
     optional_params.add_argument(
