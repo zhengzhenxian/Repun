@@ -1,16 +1,17 @@
-# Representation Unification
+# Repun: An Accurate Representation Unification Method for Small Germline Variant
 
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-Contact: Ruibang Luo  
+Contact: Zhenxian Zheng, Ruibang Luo  
 
-Email: rbluo@cs.hku.hk  
+Email: {zxzheng,rbluo}@cs.hku.hk  
 
 ---
 
 ## Introduction
 
-This document shows how Clair3 unifies the representation between the training materials and true variant set.
+Accurate variant representation unification is critical as variants may differ across platforms and sequencing conditions. Current approaches typically treat variant unification as a post-step following variant calling and are incapable of measuring from the outset. Unifying variant representations without the aid of variant calling offers advantages in scenarios where no specific variant callers are accessible while presenting challenges due to the multitude of variant candidates to process. Here, we present Repun, a haplotype-aware variant-alignment unification algorithm that harmonizes the variant representation across different sequencing platforms and the provided variant callsets. Repun leverages phasing to maximize equivalent haplotype matches between variants and alignments. Our approach employed a pruned haplotype match strategy utilizing read evidence to streamline pairwise comparisons and improve variant discovery efficiency. Repun achieved >99.99% precision and >99.5% recall through extensive evaluations of various GIAB samples encompassing three sequencing platforms: ONT, PacBio, and Illumina.
+
 
 ----
 
@@ -34,8 +35,8 @@ A pre-built docker image is available at [DockerHub](https://hub.docker.com/r/hk
 docker run -it \
   -v ${INPUT_DIR}:${INPUT_DIR} \
   -v ${OUTPUT_DIR}:${OUTPUT_DIR} \
-  hkubal/ru:latest \
-  /opt/bin/ru \
+  hkubal/repun:latest \
+  /opt/bin/repun \
   --bam_fn ${INPUT_DIR}/sample.bam \       ## use your bam file name here
   --ref_fn ${INPUT_DIR}/ref.fa \           ## use your reference file name here
   --truth_vcf_fn ${INPUT_DIR}/truth.vcf \  ## use your truth VCF file name here
@@ -49,15 +50,15 @@ This is the same as option 1 except that you are building a docker image yoursel
 
 ```bash
 # clone the repo
-git clone https://github.com/zhengzhenxian/ru.git
+git clone https://github.com/zhengzhenxian/Repun.git
 cd ru
 
-# build a docker image named hkubal/ru:latest
+# build a docker image named hkubal/repun:latest
 # might require docker authentication to build docker image 
-docker build -f ./Dockerfile -t hkubal/ru:latest .
+docker build -f ./Dockerfile -t hkubal/repun:latest .
 
 # run the docker image like option 1
-docker run -it hkubal/ru:latest /opt/bin/ru --help
+docker run -it hkubal/repun:latest /opt/bin/repun --help
 ```
 
 
@@ -70,7 +71,7 @@ Check [Usage](#Usage) for more options.
 ### General Usage
 
 ```bash
-./ru \
+./repun \
   --bam_fn ${INPUT_DIR}/sample.bam \       ## use your bam file name here
   --ref_fn ${INPUT_DIR}/ref.fa \           ## use your reference file name here
   --truth_vcf_fn ${INPUT_DIR}/truth.vcf \  ## use your truth VCF file name here
