@@ -765,7 +765,7 @@ def ru(args):
 def ru_parser():
 
     parser = argparse.ArgumentParser(
-        description="Run Clair3 Representation Unification. Example run: ru -b BAM_FN -r REF_FN --truth_vcf_fn TRUTH_VCF_FN -o OUTPUT_DIR -t THREADS -p PLATFORM")
+        description="Run Clair3 Representation Unification. Example run: repun -b BAM_FN -r REF_FN --truth_vcf_fn TRUTH_VCF_FN -o OUTPUT_DIR -t THREADS -p PLATFORM")
 
     # print version
     parser.add_argument('-v', '--version', action='version',
