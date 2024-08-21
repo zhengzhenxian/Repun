@@ -18,6 +18,7 @@ Accurate variant representation unification is critical as variants may differ a
 ## Contents
 - [Installation](#installation)
   - [Option 1. Docker pre-built image](#option-1--docker-pre-built-image)
+  - [Option 2. Docker Dockerfile](#option-2-docker-dockerfile)
 - [Usage](#usage)
 - [Disclaimer](#disclaimer)
 
