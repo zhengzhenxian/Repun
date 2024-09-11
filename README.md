@@ -33,14 +33,14 @@ A pre-built docker image is available at [DockerHub](https://hub.docker.com/r/hk
 **Caution**: Absolute path is needed for both `INPUT_DIR` and `OUTPUT_DIR` in docker. 
 
 ```bash
-docker run -it \
+docker n -it \
   -v ${INPUT_DIR}:${INPUT_DIR} \
   -v ${OUTPUT_DIR}:${OUTPUT_DIR} \
   hkubal/repun:latest \
   /opt/bin/repun \
   --bam_fn ${INPUT_DIR}/sample.bam \       ## use your bam file name here
   --ref_fn ${INPUT_DIR}/ref.fa \           ## use your reference file name here
-  --truth_vcf_fn ${INPUT_DIR}/truth.vcf \  ## use your truth VCF file name here
+  --tth_vcf_fn ${INPUT_DIR}/tth.vcf \  ## use your tth VCF file name here
   --threads ${THREADS} \                   ## maximum threads to be used
   --platform ${PLATFORM} \                 ## options: {ont, hifi, ilmn}
   --output_dir ${OUTPUT_DIR}               ## output path prefix 
@@ -52,7 +52,7 @@ This is the same as option 1 except that you are building a docker image yoursel
 ```bash
 # clone the repo
 git clone https://github.com/zhengzhenxian/Repun.git
-cd ru
+cd Repun
 
 # build a docker image named hkubal/repun:latest
 # might require docker authentication to build docker image 
@@ -112,7 +112,7 @@ Check [Usage](#Usage) for more options.
   -c CTG_NAME, --ctg_name CTG_NAME
                         The name of the contigs to be processed. Split by ',' for multiple contigs.
                         Default: all contigs will be processed.
-  --bed_fn BED_FN       Path to a BED file. Execute RU only in the provided BED regions.
+  --bed_fn BED_FN       Path to a BED file. Execute Repun only in the provided BED regions.
   --region REGION       A region to be processed. Format: `ctg_name:start-end` (start is 1-based).
   --min_af MIN_AF       Minimal AF required for a variant to be called. Default: 0.08.
   --min_coverage MIN_COVERAGE
@@ -123,7 +123,7 @@ Check [Usage](#Usage) for more options.
                         Prefix for output VCF filename. Default: output.
   --remove_intermediate_dir
                         Remove intermediate directory before finishing to save disk space.
-  --include_all_ctgs    Execute RU on all contigs, otherwise call in chr{1..22,X,Y} and {1..22,X,Y}.
+  --include_all_ctgs    Execute Repun on all contigs, otherwise call in chr{1..22,X,Y} and {1..22,X,Y}.
   -d, --dry_run         Print the commands that will be ran.
   --python PYTHON       Absolute path of python, python3 >= 3.9 is required.
   --pypy PYPY           Absolute path of pypy3, pypy3 >= 3.6 is required.
