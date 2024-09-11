@@ -28,7 +28,7 @@ Accurate variant representation unification is critical as variants may differ a
 
 ### Option 1.  Docker pre-built image
 
-A pre-built docker image is available at [DockerHub](https://hub.docker.com/r/hkubal/ru). 
+A pre-built docker image is available at [DockerHub](https://hub.docker.com/r/hkubal/repun). 
 
 **Caution**: Absolute path is needed for both `INPUT_DIR` and `OUTPUT_DIR` in docker. 
 
