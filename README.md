@@ -1,4 +1,5 @@
-# Repun: An Accurate Representation Unification Method for Small Germline Variant
+# Repun: An accurate small variant representation unification method for multiple sequencing platforms
+
 
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
@@ -10,7 +11,8 @@ Email: {zxzheng,rbluo}@cs.hku.hk
 
 ## Introduction
 
-Accurate variant representation unification is critical as variants may differ across platforms and sequencing conditions. Current approaches typically treat variant unification as a post-step following variant calling and are incapable of measuring from the outset. Unifying variant representations without the aid of variant calling offers advantages in scenarios where no specific variant callers are accessible while presenting challenges due to the multitude of variant candidates to process. Here, we present Repun, a haplotype-aware variant-alignment unification algorithm that harmonizes the variant representation across different sequencing platforms and the provided variant callsets. Repun leverages phasing to maximize equivalent haplotype matches between variants and alignments. Our approach employed a pruned haplotype match strategy utilizing read evidence to streamline pairwise comparisons and improve variant discovery efficiency. Repun achieved >99.99% precision and >99.5% recall through extensive evaluations of various GIAB samples encompassing three sequencing platforms: ONT, PacBio, and Illumina.
+Ensuring a unified variant representation aligning the sequencing data is critical for downstream analysis as variant representation may differ across platforms and sequencing conditions. Current approaches typically treat variant unification as a post-step following variant calling and are incapable of measuring the correct variant representation from the outset. Aligning variant representations with the alignment before variant calling has benefits like providing reliable training labels for deep learning-based variant caller model training and enabling direct assessment of alignment quality. However, it also poses challenges due to the large number of candidates to handle. Here, we present Repun, a haplotype-aware variant-alignment unification algorithm that harmonizes the variant representation between provided variants and alignments in different sequencing platforms. Repun leverages phasing to facilitate equivalent haplotype matches between variants and alignments. Our approach reduced the comparisons between variant haplotypes and candidate haplotypes by utilizing haplotypes with read evidence to speed up the unification process. Repun achieved >99.99% precision and >99.5% recall through extensive evaluations of various GIAB samples encompassing three sequencing platforms: ONT, PacBio, and Illumina.
+
 
 
 ----
@@ -40,7 +42,7 @@ docker n -it \
   /opt/bin/repun \
   --bam_fn ${INPUT_DIR}/sample.bam \       ## use your bam file name here
   --ref_fn ${INPUT_DIR}/ref.fa \           ## use your reference file name here
-  --tth_vcf_fn ${INPUT_DIR}/tth.vcf \  ## use your tth VCF file name here
+  --truth_vcf_fn ${INPUT_DIR}/tth.vcf \  ## use your VCF file name here
   --threads ${THREADS} \                   ## maximum threads to be used
   --platform ${PLATFORM} \                 ## options: {ont, hifi, ilmn}
   --output_dir ${OUTPUT_DIR}               ## output path prefix 
