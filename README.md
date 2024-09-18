@@ -35,14 +35,14 @@ A pre-built docker image is available at [DockerHub](https://hub.docker.com/r/hk
 **Caution**: Absolute path is needed for both `INPUT_DIR` and `OUTPUT_DIR` in docker. 
 
 ```bash
-docker n -it \
+docker run -it \
   -v ${INPUT_DIR}:${INPUT_DIR} \
   -v ${OUTPUT_DIR}:${OUTPUT_DIR} \
   hkubal/repun:latest \
   /opt/bin/repun \
   --bam_fn ${INPUT_DIR}/sample.bam \       ## use your bam file name here
   --ref_fn ${INPUT_DIR}/ref.fa \           ## use your reference file name here
-  --truth_vcf_fn ${INPUT_DIR}/tth.vcf \  ## use your VCF file name here
+  --truth_vcf_fn ${INPUT_DIR}/truth.vcf \  ## use your VCF file name here
   --threads ${THREADS} \                   ## maximum threads to be used
   --platform ${PLATFORM} \                 ## options: {ont, hifi, ilmn}
   --output_dir ${OUTPUT_DIR}               ## output path prefix 
@@ -124,9 +124,9 @@ Check [Usage](#Usage) for more options.
   --output_prefix OUTPUT_PREFIX
                         Prefix for output VCF filename. Default: output.
   --remove_intermediate_dir
-                        Remove intermediate directory before finishing to save disk space.
+                        Remove the intermediate directory before finishing to save disk space.
   --include_all_ctgs    Execute Repun on all contigs, otherwise call in chr{1..22,X,Y} and {1..22,X,Y}.
-  -d, --dry_run         Print the commands that will be ran.
+  -d, --dry_run         Print the commands that will be run.
   --python PYTHON       Absolute path of python, python3 >= 3.9 is required.
   --pypy PYPY           Absolute path of pypy3, pypy3 >= 3.6 is required.
   --samtools SAMTOOLS   Absolute path of samtools, samtools version >= 1.10 is required.
