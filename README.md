@@ -26,6 +26,13 @@ Ensuring a unified variant representation aligning the sequencing data is critic
 
 ----
 
+## Latest Updates
+*v0.1.0 (Apr 18, 2025)* : 1. Added somatic variant representation unification workflow. User can enable by using the `--somatic_mode` option. The somatic mode prioritizes only low-VAF sites (default 0.08, configurable using `--max_af_for_somatic_unification`) during processing and optimized alignment scanning for computational efficiency. A configurable edit distance thresholds (maximum 0 for SNV and 4 for Indel) is used. This allows for gaps between VCF haplotypes and alignment haplotypes for more potential matches into manual consideration.
+
+*v0.0.1 (Sep 18, 2024)*: Initial release for early access.
+
+---
+
 ## Installation
 
 ### Option 1.  Docker pre-built image
@@ -133,6 +140,19 @@ Check [Usage](#Usage) for more options.
   --whatshap WHATSHAP   Absolute path of whatshap, whatshap >= 1.0 is required.
   --parallel PARALLEL   Absolute path of parallel, parallel >= 20191122 is required.
   --disable_phasing     Disable phasing with whatshap.
+  --somatic_mode        Enable somatic mode. Default: False.
+
+Somatic mode parameters:
+  --max_af_for_somatic_unification MAX_AF_FOR_SOMATIC_UNIFICATION
+                        Maximum allelic fraction for a somatic variant to be unified. Default: 0.08
+  --vaf_threshold_for_pass VAF_THRESHOLD_FOR_PASS
+                        If set, variants with >VAF will be marked as PASS, or LowVAF otherwise. Default: 0.08
+  --snv_maximum_edit_distance SNV_MAXIMUM_EDIT_DISTANCE
+                        Maximum SNV edit distance that allow to be unified, default: 0
+  --indel_maximum_edit_distance INDEL_MAXIMUM_EDIT_DISTANCE
+                        Maximum Indel edit distance that allow to be unified, default: 4
+  --allow_candidate_haplotype_shorter_than_truth_haplotype ALLOW_CANDIDATE_HAPLOTYPE_SHORTER_THAN_TRUTH_HAPLOTYPE
+                        Allow the candidate haplotype shorter than truth haploytpe, default: True
 
 ```
 
