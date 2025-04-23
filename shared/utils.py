@@ -320,6 +320,8 @@ def get_header(reference_file_path=None, cmd_fn=None, sample_name="SAMPLE", vers
         header_list.insert(insert_index, cmdline_str)
         header = "\n".join(header_list) + '\n'
 
+    return header
+
 class Position(object):
     def __init__(self, genotype1, genotype2, pos=None,ref_base=None, alt_base=None, candidate=False, cigar_count=None,
                  confident_variant=False, depth=None, alt_list=None, af_list=None, alt_type_mapping_dict=None):

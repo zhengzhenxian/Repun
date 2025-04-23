@@ -9,7 +9,7 @@ from os.path import isfile
 from argparse import ArgumentParser, SUPPRESS
 from collections import Counter, defaultdict, OrderedDict
 
-import shared.param_f as param
+import shared.param_somatic as param
 from shared.utils import subprocess_popen, file_path_from, IUPAC_base_to_num_dict as BASE2NUM, region_from, \
     reference_sequence_from, str2bool, vcf_candidates_from
 from shared.interval_tree import bed_tree_from, is_region_in
@@ -160,7 +160,7 @@ def get_tensor_info(base_info, bq, ref_base, read_mq):
         base_upper = evc_base_from(base_upper)
         ALT_BASE = ACGT_NUM[base_upper]
 
-    REF_BASE = ACGT_NUM[ref_base]
+    REF_BASE = ACGT_NUM[ref_base if ref_base.upper() in "ACGT" else 'A']
     if len(indel) and indel[0] in '+-':
         if indel[0] == "+":
             ins_base = indel[1:].upper()
@@ -321,6 +321,7 @@ def generate_tensor(ctg_name, center_pos, sorted_read_name_list, pileup_dict, re
 
     alt_dict = defaultdict(int)
     depth, max_del_length = 0, 0
+    ref_count = 0
     for base, indel in pileup_dict[center_pos].base_list:
         if base in "#*":
             depth += 1
@@ -335,7 +336,8 @@ def generate_tensor(ctg_name, center_pos, sorted_read_name_list, pileup_dict, re
                 max_del_length = max(len(indel), max_del_length)
         elif base.upper() != reference_base:
             alt_dict[base.upper()] += 1
-
+        elif base.upper() == reference_base:
+            ref_count += 1
     # match deletion cases and bed format
     pass_confident_bed = not len(confident_bed_tree) or is_region_in(confident_bed_tree, ctg_name,
                                                                      center_pos - 2,
@@ -391,6 +393,8 @@ def generate_tensor(ctg_name, center_pos, sorted_read_name_list, pileup_dict, re
             alt_info.append(['D' + del_ref_bases, str(alt_count)])
         else:
             alt_info.append(['X' + alt_type, str(alt_count)])
+    if ref_count > 0:
+        alt_info.append(['R' + reference_base, str(ref_count)])
 
     alt_info = str(depth) + '-' + ' '.join([' '.join([item[0], str(item[1])]) for item in alt_info])
     tensor_string_list = [" ".join((" ".join(" ".join(str(x) for x in innerlist) for innerlist in outerlist)) for outerlist in tensor)]
@@ -517,7 +521,7 @@ def CreateTensorFullAlignment(args):
         # if '.' in full_aln_regions.split('/')[-1] and len(full_aln_regions.split('/')[-1].split('.')[-1].split('_')) > 0:
         #     ctg_start, ctg_end = full_aln_regions.split('/')[-1].split('.')[-1].split('_')
         #     ctg_start, ctg_end = int(ctg_start), int(ctg_end)
-    if platform == 'ilmn' and bam_file_path == "PIPE":
+    if platform == 'ilmn' and bam_file_path == "PIPE" and not unify_repre:
         add_read_regions = False
 
     fai_fn = file_path_from(fasta_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
@@ -536,7 +540,6 @@ def CreateTensorFullAlignment(args):
             tree, bed_start, bed_end = bed_tree_from(bed_file_path=extend_bed,
                                                      contig_name=ctg_name,
                                                      return_bed_region=True)
-
             chunk_size = (bed_end - bed_start) // chunk_num + 1 if (bed_end - bed_start) % chunk_num else (
                                                                                                                       bed_end - bed_start) // chunk_num
             ctg_start = bed_start + 1 + chunk_size * chunk_id  # 0-base to 1-base
@@ -556,7 +559,7 @@ def CreateTensorFullAlignment(args):
             ctg_end = ctg_start + chunk_size
 
         # for illumina platform, the reads alignment is acquired after reads realignment from ReadsRealign.py
-        if platform == 'ilmn' and bam_file_path != "PIPE":
+        if platform == 'ilmn' and bam_file_path != "PIPE" and not unify_repre:
             bam_file_path += '.{}_{}'.format(ctg_start, ctg_end)
             add_read_regions = False
         if bam_file_path == "PIPE":
@@ -600,6 +603,7 @@ def CreateTensorFullAlignment(args):
     extend_start, extend_end = None, None
     if is_ctg_range_given:
         extend_start = ctg_start - (phasing_window_size if need_phasing else no_of_positions)
+        extend_start = max(1, extend_start)
         extend_end = ctg_end + (phasing_window_size if need_phasing else no_of_positions)
         reads_regions.append(region_from(ctg_name=ctg_name, ctg_start=extend_start, ctg_end=extend_end))
         reference_start, reference_end = ctg_start - param.expandReferenceRegion, ctg_end + param.expandReferenceRegion
@@ -623,10 +627,10 @@ def CreateTensorFullAlignment(args):
     bq_option = ' --min-BQ {}'.format(min_base_quality)
     # pileup bed first
     bed_option = ' -l {}'.format(
-        extend_bed) if is_extend_bed_file_given and platform != 'ilmn' else ""
-    bed_option = ' -l {}'.format(full_aln_regions) if is_full_aln_regions_given and platform != 'ilmn' else bed_option
+        extend_bed) if is_extend_bed_file_given and (platform != 'ilmn' or (platform == 'ilmn' and unify_repre)) else ""
+    bed_option = ' -l {}'.format(full_aln_regions) if is_full_aln_regions_given and (platform != 'ilmn' or (platform == 'ilmn' and unify_repre)) else bed_option
     flags_option = ' --excl-flags {}'.format(param.SAMTOOLS_VIEW_FILTER_FLAG)
-    max_depth_option = ' --max-depth {}'.format(args.max_depth) if args.max_depth > 0 else ""
+    max_depth_option = ' --max-depth {}'.format(args.max_depth) if args.max_depth is not None else " "
     reads_regions_option = ' -r {}'.format(" ".join(reads_regions)) if add_read_regions else ""
     # print (add_read_regions, ctg_start, ctg_end, reference_start)
     stdin = None if bam_file_path != "PIPE" else sys.stdin
@@ -637,6 +641,7 @@ def CreateTensorFullAlignment(args):
     samtools_mpileup_process = subprocess_popen(
         shlex.split(samtools_command), stdin=stdin)
 
+    # print(samtools_command)
     if not unify_repre:
         if tensor_can_output_path != "PIPE":
             tensor_can_fpo = open(tensor_can_output_path, "wb")
@@ -674,6 +679,11 @@ def CreateTensorFullAlignment(args):
         for row in samtools_mpileup_process.stdout:  # chr position N depth seq BQ read_name mapping_quality phasing_info
             columns = row.strip().split('\t')
             pos = int(columns[1])
+
+            #https://github.com/HKU-BAL/Clair3/issues/105 skip realigned position out of reference sequence for illumina platform
+            if platform == 'ilmn' and (pos < reference_start + flanking_base_num or pos > reference_end - flanking_base_num + 1):
+                continue
+
             # pos that near bed region should include some indel cover in bed
             pass_extend_bed = not is_extend_bed_file_given or is_region_in(extend_bed_tree,
                                                                                      ctg_name, pos - 1,
@@ -683,9 +693,12 @@ def CreateTensorFullAlignment(args):
                 continue
             pileup_bases = columns[4]
             raw_base_quality = columns[5]
-            read_name_list = columns[6].split(',')
-            raw_mapping_quality = columns[7]
-            reference_base = evc_base_from(reference_sequence[pos - reference_start].upper())  # ev
+            # samtools change mapping quality and read name order in v1.15.1
+            mq_index = 6 if len(columns[6]) <= len(columns[7]) else 7
+            rn_index = 7 if mq_index == 6 else 6
+            raw_mapping_quality = columns[mq_index]
+            read_name_list = columns[rn_index].split(',')
+            reference_base = reference_sequence[pos - reference_start].upper()
             base_list, depth, pass_af, af = decode_pileup_bases(pileup_bases=pileup_bases,
                                                                 reference_base=reference_base,
                                                                 minimum_af_for_candidate=minimum_af_for_candidate,
@@ -909,16 +922,16 @@ def main():
                         help="Path to the 'samtools', samtools version >= 1.10 is required. default: %(default)s")
 
     # options for advanced users
-    parser.add_argument('--minCoverage', type=float, default=2,
+    parser.add_argument('--minCoverage', type=int, default=param.min_coverage,
                         help="EXPERIMENTAL: Minimum coverage required to call a variant, default: %(default)f")
 
-    parser.add_argument('--minMQ', type=int, default=5,
+    parser.add_argument('--minMQ', type=int, default=param.min_mq,
                         help="EXPERIMENTAL: If set, reads with mapping quality with <$minMQ are filtered, default: %(default)d")
 
-    parser.add_argument('--minBQ', type=int, default=0,
+    parser.add_argument('--minBQ', type=int, default=param.min_bq,
                         help="EXPERIMENTAL: If set, bases with base quality with <$minBQ are filtered, default: %(default)d")
 
-    parser.add_argument('--max_depth', type=int, default=144,
+    parser.add_argument('--max_depth', type=int, default=None,
                         help="EXPERIMENTAL: Maximum full alignment depth to be processed. default: %(default)s")
 
     # options for debug purpose

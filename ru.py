@@ -16,10 +16,15 @@ data_preprocess_folder = [
     "ExtractCandidates",
     "SplitExtendBed",
     "UnifyRepresentation",
+    "extract_candidates_somatic",
     'VcfReader',
     "SortVcf",
     "PlotAlignment",
-    "GetTruth"
+    "GetTruth",
+    "cal_af_distribution",
+    'unify_representation_somatic',
+    'sort_vcf_somatic',
+    "get_truth_somatic"
 ]
 
 post_process_scripts_folder = [

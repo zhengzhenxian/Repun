@@ -104,6 +104,7 @@ def create_output_folder(args):
     phased_vcf_path = folder_path_from(os.path.join(tmp_file_path, 'phased_vcf'), create_not_found=True)
     phased_bam_path = folder_path_from(os.path.join(tmp_file_path, 'phased_bam'), create_not_found=True)
     vcf_output_path = folder_path_from(os.path.join(tmp_file_path, 'vcf_output'), create_not_found=True)
+    vcf_output_path = folder_path_from(os.path.join(tmp_file_path, 'af_distribution'), create_not_found=True)
 
     output_path = OutputPath(log_path=log_path,
                              tmp_file_path=tmp_file_path,
@@ -486,6 +487,19 @@ def check_args(args):
     if args.chunk_size is None:
         args.chunk_size = 5000000
 
+    if args.max_af_for_somatic_unification is None:
+        args.max_af_for_somatic_unification = 0.08
+    if args.vaf_threshold_for_pass is None:
+        args.vaf_threshold_for_pass = 0.08
+
+    if args.snv_maximum_edit_distance is None:
+        args.snv_maximum_edit_distance = 0
+
+    if args.allow_candidate_haplotype_shorter_than_truth_haplotype is None:
+        args.allow_candidate_haplotype_shorter_than_truth_haplotype = True
+
+    if args.indel_maximum_edit_distance is None:
+        args.indel_maximum_edit_distance = 4
     if args.platform not in {'ont', 'hifi', 'ilmn'}:
         logging(log_error('[ERROR] Invalid platform input, optional: {ont, hifi, ilmn}'))
 
@@ -573,6 +587,136 @@ def print_command_line(args):
         return args
     logging("[COMMAND] " + cmdline + '\n')
     return args
+
+def ru_somatic(args):
+    step = 1
+    echo_list = []
+    commands_list = []
+
+    try:
+        rc = subprocess.check_call('time', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time = 'time '
+    except subprocess.CalledProcessError as e:
+        time = ''
+
+    # STEP 1: Split bed file regions according to the contig name and extend bed region
+    echo_list.append(
+        "[INFO] STEP {}: Split bed file regions according to the contig name and extend bed region".format(step))
+    step += 1
+    seb_command = '( ' + time + args.parallel
+    seb_command += ' --joblog ' + args.output_dir + '/logs/parallel_1_split_extend_bed.log'
+    seb_command += ' -j ' + str(args.threads)
+    seb_command += ' ' + args.pypy + ' ' + main_entry + ' SplitExtendBed'
+    seb_command += ' --bed_fn {}'.format(args.bed_fn) if args.bed_fn is not None else ''
+    seb_command += ' --ctgName {1}'
+    seb_command += ' --output_fn ' + args.output_dir + '/tmp/split_beds/{1}'
+    seb_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+    seb_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/1_SEB.log'
+    commands_list.append(seb_command)
+
+    # STEP 2: Calculate AF from BAM
+    echo_list.append("[INFO] STEP {}: Calculate AF from truth".format(step))
+    step += 1
+    caf_command = '( ' + time + args.parallel
+    caf_command += ' --joblog ' + args.output_dir + '/logs/parallel_2_cal_af.log'
+    caf_command += ' -C " " -j ' + str(args.threads)
+    caf_command += ' ' + args.pypy + ' ' + main_entry + ' cal_af_distribution'
+    caf_command += ' --output_path ' + args.output_dir + '/tmp/af_distribution/truth_{1}_{2}'
+    caf_command += ' --tumor_bam_fn ' + args.bam_fn
+    caf_command += ' --truth_vcf_fn ' + args.truth_vcf_fn
+    caf_command += ' --threads ' + str(args.threads)
+    caf_command += ' --chunk_id {2}'
+    caf_command += ' --chunk_num {3}'
+    caf_command += ' --samtools ' + args.samtools
+    caf_command += ' --ctg_name {1}'
+    caf_command += ' :::: ' + os.path.join(args.output_dir, 'tmp', 'CHUNK_LIST')
+    caf_command += ") && cat " + args.output_dir + '/tmp/af_distribution/truth_* > ' + args.output_dir + '/tmp/af_distribution/truths'
+    commands_list.append(caf_command)
+
+    # STEP 3: Get true variant label information from VCF file
+    echo_list.append("[INFO] STEP {}: Get true variant label information from VCF file".format(step))
+    step += 1
+    gtv_command = '( ' + time + args.parallel
+    gtv_command += ' --joblog ' + args.output_dir + '/logs/parallel_4_get_true_variant.log'
+    gtv_command += ' -j ' + str(args.threads)
+    gtv_command += ' ' + args.pypy + ' ' + main_entry + ' get_truth_somatic'
+    gtv_command += ' --vcf_fn ' + args.output_dir + '/tmp/af_distribution/truths'
+    gtv_command += ' --ctgName {1}'
+    gtv_command += ' --output_bed_fn ' + args.output_dir + '/tmp/split_beds/bed_{1}'
+    if args.max_af_for_somatic_unification is not None:
+        gtv_command += ' --max_af ' + str(args.max_af_for_somatic_unification)
+    gtv_command += ' --var_fn ' + args.output_dir + '/tmp/var/var_{1}'
+    gtv_command += ' :::: ' + args.output_dir + '/tmp/CONTIGS'
+    gtv_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/4_GTV.log'
+    commands_list.append(gtv_command)
+
+    # STEP 4: Label Variant
+    echo_list.append("[INFO] STEP {}: Unify somatic variant".format(step))
+    step += 1
+    lv_command = '( ' + time + args.parallel
+    lv_command += ' --joblog ' + args.output_dir + '/logs/parallel_6_unify_representation.log'
+    lv_command += ' -C " " -j ' + str(args.threads)
+    lv_command += ' ' + args.pypy + ' ' + main_entry + ' unify_representation_somatic'
+    lv_command += ' --bam_fn ' +  args.bam_fn
+    lv_command += ' --ref_fn ' + args.ref_fn
+    lv_command += ' --var_fn ' + args.output_dir + '/tmp/var/var_{1}'
+    lv_command += ' --output_vcf ' + args.output_dir + '/tmp/vcf_output/vcf_{1}_{2}.vcf'
+    lv_command += ' --platform ' + args.platform
+    lv_command += ' --ctgName {1}'
+    lv_command += ' --bed_fn ' + args.output_dir + '/tmp/split_beds/bed_{1}'
+    lv_command += ' --extend_bed ' + args.output_dir + '/tmp/split_beds/bed_{1}'
+    lv_command += ' --chunk_id {2}'
+    lv_command += ' --chunk_num {3}'
+    lv_command += ' --sampleName {4}'
+    if args.snv_maximum_edit_distance is not None:
+        lv_command += ' --snv_maximum_edit_distance ' + str(args.snv_maximum_edit_distance)
+    if args.indel_maximum_edit_distance is not None:
+        lv_command += ' --indel_maximum_edit_distance ' + str(args.indel_maximum_edit_distance)
+    if args.allow_candidate_haplotype_shorter_than_truth_haplotype:
+        lv_command += ' --allow_candidate_haplotype_shorter_than_truth_haplotype True'
+    lv_command += ' :::: ' + os.path.join(args.output_dir, 'tmp', 'CHUNK_LIST')
+    lv_command += ' ::: ' + args.sample_name
+    lv_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/6_RU.log'
+    commands_list.append(lv_command)
+
+    # STEP 5: Merge and Sort VCFs
+    echo_list.append("[INFO] Merge and Sort VCFs")
+    p_mv_command = args.pypy + ' ' + main_entry + ' sort_vcf_somatic'
+    p_mv_command += ' --ref_fn ' + args.ref_fn
+    p_mv_command += ' --contigs_fn ' + os.path.join(args.output_dir, 'tmp', 'CONTIGS')
+    p_mv_command += ' --input_dir ' + args.output_dir + '/tmp/vcf_output'
+    p_mv_command += ' --vcf_fn_prefix ' + 'vcf_'
+    if args.vaf_threshold_for_pass is not None:
+        p_mv_command += ' --vaf_threshold_for_pass ' + str(args.vaf_threshold_for_pass)
+    p_mv_command += ' --truth_vcf_fn ' + args.output_dir + '/tmp/af_distribution/truths'
+    p_mv_command += ' --output_fn ' + args.output_dir + '/unified.vcf'
+    commands_list.append(p_mv_command)
+
+    # Execute commands step by step
+    skip_steps = args.skip_steps.rstrip().split(',') if args.skip_steps else None
+    stdout = sys.stdout if args.tee is None else args.tee.stdin
+    for i, (command, echo) in enumerate(zip(commands_list, echo_list)):
+
+        logging(echo)
+        logging("[INFO] RUN THE FOLLOWING COMMAND:")
+        logging(command)
+        logging("")
+        if not args.dry_run:
+            if skip_steps is not None and str(i + 1) in skip_steps:
+                logging("[INFO] --skip_steps is enabled, skip running step {}.".format(i + 1))
+                logging("")
+                continue
+            try:
+                return_code = subprocess.check_call(command, shell=True, stdout=stdout)
+            except subprocess.CalledProcessError as e:
+                sys.stderr.write("ERROR in STEP {}, THE FOLLOWING COMMAND FAILED: {}\n".format(i + 1, command))
+                exit(1)
+        logging("")
+
+    if args.remove_intermediate_dir:
+        logging("[INFO] Removing intermediate files in {}/tmp ...".format(args.output_dir))
+        subprocess.run('rm -rf {}/tmp'.format(args.output_dir), shell=True)
+
 
 
 def ru(args):
@@ -986,6 +1130,45 @@ def ru_parser():
         help=SUPPRESS
     )
 
+    optional_params.add_argument(
+        "--somatic_mode",
+        action='store_true',
+        help="Enable somatic mode. Default: False."
+    )
+
+    somatic_params = parser.add_argument_group('Somatic parameters')
+
+    somatic_params.add_argument(
+        "--max_af_for_somatic_unification",
+        type=float,
+        default=None,
+        help='Maximum allelic fraction for a somatic variant to be unified. Default: 0.08'
+    )
+
+    somatic_params.add_argument(
+        "--vaf_threshold_for_pass",
+        type=float,
+        default=None,
+        help="If set, variants with >VAF will be marked as PASS, or LowVAF otherwise. Default: 0.08"
+    )
+
+    somatic_params.add_argument(
+        '--snv_maximum_edit_distance',
+        type=int,
+        default=None,
+        help="Maximum SNV edit distance that allow to be unified, default: 0")
+
+    somatic_params.add_argument(
+        '--indel_maximum_edit_distance',
+        type=int,
+        default=None,
+        help="Maximum Indel edit distance that allow to be unified, default: 4")
+
+    somatic_params.add_argument(
+        '--allow_candidate_haplotype_shorter_than_truth_haplotype',
+        type=str2bool,
+        default=None,
+        help="Allow the candidate haplotype shorter than truth haploytpe, default: True")
     return parser
 
 def main():
@@ -1015,7 +1198,10 @@ def main():
     args = print_command_line(args)
     args = check_args(args)
     args = print_args(args)
-    ru(args)
+    if args.somatic_mode:
+        ru_somatic(args)
+    else:
+        ru(args)
 
     runtime = time() - call_start_time
     logging("[INFO] Total time elapsed: %im%.2fs\n" % (int(runtime/60), int(runtime % 60)))
