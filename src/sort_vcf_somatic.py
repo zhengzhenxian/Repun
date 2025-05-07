@@ -33,6 +33,8 @@ def output_vcf_header(reference_file_path, output_fn=None, sample_name='SAMPLE')
         ##FILTER=<ID=PASS,Description="All filters passed">
         ##FILTER=<ID=LowVAF,Description="Variant with low alleic fraction">
         ##INFO=<ID=U,Number=0,Type=Flag,Description="Result from unified match">
+        ##INFO=<ID=Truths,Number=.,Type=String,Description="List of the truth variants for representation unification.">
+        ##INFO=<ID=Candidates,Number=.,Type=String,Description="List of the candidate variants in the alignment after representation unification.">
         ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
         ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
         ##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
@@ -279,8 +281,6 @@ def sort_vcf_from(args):
                     elif 'U' not in row.rstrip().split('\t')[7]:
                         row = row.rstrip().replace("PASS", "LowVAF")
                     columns = row.rstrip().split('\t')
-                    columns[8] = 'DP:AF:' + columns[8]
-                    columns[9] = f'{dp}:{af}:' + columns[9]
                     row = '\t'.join(columns) + '\n'
 
             output.write(row)

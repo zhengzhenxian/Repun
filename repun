@@ -405,6 +405,7 @@ def check_contigs_intersection(args, fai_fn):
         for c in sorted_contig_list:
             if c not in contig_chunk_num:
                 logging(log_warning(("[WARNING] Contig {} given but not found in the reference".format(c))))
+        sorted_contig_list = [c for c in sorted_contig_list if c in contig_chunk_num]
 
         # check contig in bam have support reads
         sorted_contig_list, found_contig = check_contig_in_bam(bam_fn=args.bam_fn, sorted_contig_list=sorted_contig_list,

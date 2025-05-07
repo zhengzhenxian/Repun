@@ -1243,52 +1243,16 @@ class RepresentationUnification(object):
                                                 variant_dict=variant_dict,
                                                 read_name_info_dict=read_name_info_dict,
                                                 alt_dict=alt_dict)
-
             if match_pairs is None:
-                if not len(truths):
-                    continue
-                # double check to rescue true variants
-                for truth in all_truths:
-                    pos = truth.start
-                # add missing low-confident tp position
-                    if not (pos >= split_start and pos < split_end) or (ctg_start is not None and ctg_end is not None
-                                                                        and not (pos >= ctg_start and pos < ctg_end)):
-                        continue
-                    if pos in alt_dict and pos in variant_dict:
-                        ref_base = variant_dict[pos].reference_bases
-                        alt_base = variant_dict[pos].alternate_bases
-                        alt_list = alt_dict[pos].alt_list
-                        if not match_alt_base(alt_list, ref_base, alt_base):
-                            print('[INFO] {} {} miss and has no cigar support'.format(self.sample_ctg_info, pos))
-                            continue
-                        print('[INFO] {} {} miss by match, append to vcf'.format(self.sample_ctg_info, pos))
-                        if pos in all_pos or pos in rescue_dict:
-                            continue
-                        ref_base = variant_dict[pos].reference_bases
-                        variant = ','.join(variant_dict[pos].alternate_bases)
-                        genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
-                        # For efficiency, we currently only compute reference base, altnertive base and genotype from GetTruth.py
-                        rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                                self.contig_name,
-                                pos,
-                                ref_base,
-                                variant,
-                                10,
-                                'PASS',
-                                '.',
-                                genotype_string,
-                                10,
-                                10,
-                                0.5)
                 continue
-
             truths_list = []
             candidates_list = []
             for idx, (truth, truth_genotypes) in enumerate(
                     zip(match_pairs.truths, match_pairs.truth_genotypes)):
 
                 pos = truth.start
-                STR="POS={};REF={};ALT={};GT={}".format(pos, truth.reference_bases, truth.alternate_bases[0], get_genotype(truth_genotypes))
+                STR="{" + "POS={};REF={};ALT={};GT={}".format(pos, truth.reference_bases, truth.alternate_bases[0], get_genotype(truth_genotypes))
+                STR += "}"
                 truths_list.append(STR)
 
             for idx, (candidate, candidate_genotypes) in enumerate(
@@ -1306,12 +1270,12 @@ class RepresentationUnification(object):
                     candidate_af = '%.2f' % candidate_af
                 except:
                     candidate_af = '0.00'
-                STR="POS={};REF={};ALT={};GT={};DP={};AF={}".format(pos, candidate.reference_bases, candidate.alternate_bases[0], get_genotype(candidate_genotypes), candidate_depth, candidate_af)
+                STR= "{" + "POS={},REF={},ALT={},GT={},DP={},AF={}".format(pos, candidate.reference_bases, candidate.alternate_bases[0], get_genotype(candidate_genotypes), candidate_depth, candidate_af)
+                STR += "}"
                 candidates_list.append(STR)
             candidate_string = ','.join(candidates_list)
             truth_string = ','.join(truths_list)
-            INFO='U'
-            FORMAT = f"Truths={{{truth_string}}},Candidates={{{candidate_string}}}"
+            INFO = f"U;Truths={truth_string};Candidates={candidate_string}"
             for truth in all_truths:
                 pos = truth.start
                 # add missing low-confident tp position
@@ -1321,7 +1285,7 @@ class RepresentationUnification(object):
 
                 editing_distance = match_pairs.edit_distance if match_pairs is not None else -1
 
-                string  =f"{self.contig_name}\t{str(pos)}\t.\t{truth.reference_bases}\t{truth.alternate_bases[0]}\t.\tPASS\t{INFO}\tED\t{editing_distance}:{FORMAT}"
+                string  =f"{self.contig_name}\t{str(pos)}\t.\t{truth.reference_bases}\t{truth.alternate_bases[0]}\t.\tPASS\t{INFO}\tED\t{editing_distance}"
 
                 output_vcf_fn.write(string + '\n')
 
