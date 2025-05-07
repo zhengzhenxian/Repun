@@ -5,9 +5,12 @@ import json
 import shlex
 import os
 
+# import sys
+# sys.path.insert(0, '/autofs/bal36/zxzheng/somatic/Clair-somatic/scripts/ru_analysis/github/Repun')
+
 from collections import Counter
 from argparse import ArgumentParser, SUPPRESS
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from sys import stderr
 from subprocess import PIPE, Popen
 from shared.vcf import VcfReader
@@ -390,18 +393,22 @@ def decode_alt_info(cigar_count, ref_base, depth, minimum_allele_gap):
 
     # select maximum 2 variants type
     seq_insertion_bases_list = alt_list[:2]
+    af_list = []
     for alt_type, count in seq_insertion_bases_list:
         count = int(count)
         if count / float(depth) < minimum_allele_gap:
             continue
         if alt_type[0] == 'X':
             alt_type_list.append(alt_type[1])
+            af_list.append(count / float(depth) if depth > 0 else 0)
         elif alt_type[0] == 'I':
             alt_type_list.append(alt_type[1:])
+            af_list.append(count / float(depth) if depth > 0 else 0)
         elif alt_type[0] == 'D':
             if len(alt_type[1:]) > len(max_del_cigar):
                 max_del_cigar = alt_type[1:]
             del_list.append(ref_base + alt_type[1:])
+            af_list.append(count / float(depth) if depth > 0 else 0)
     new_del_list = []
     if len(max_del_cigar):
         ref_represatation = ref_base + max_del_cigar
@@ -412,7 +419,7 @@ def decode_alt_info(cigar_count, ref_base, depth, minimum_allele_gap):
             new_del_list.append(
                 ref_base + append_del_bases)  # ACG-> A, ACGTT -> A, max_del_cigar is CGTT, represent ACG-> A to ACGTT->ATT
     alt_base_list = alt_type_list + new_del_list
-    return ref_represatation, alt_base_list, alt_list
+    return ref_represatation, alt_base_list, alt_list, af_list
 
 def has_variant_suport(ref_base, alt_base, pos, alt_dict):
     """
@@ -932,19 +939,22 @@ class RepresentationUnification(object):
                     ref_base = variant_dict[pos].reference_bases
                     variant = ','.join(variant_dict[pos].alternate_bases)
                     genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
+                    af_list = alt_dict[pos].af_list if pos in alt_dict else []
+                    af_str = ','.join(["%.4f" % af for af in af_list]) if len(af_list) else '0.000'
+                    all_depth = alt_dict[pos].depth if pos in alt_dict else 0
+
                     # For efficiency, we currently only compute reference base, altnertive base and genotype from GetTruth.py
-                    rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
+                    rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%s\t%s\t%s\tGT:DP:AF\t%s:%d:%s" % (
                             self.contig_name,
                             pos,
                             ref_base,
                             variant,
-                            10,
+                            ".",
                             'PASS',
                             'R',
                             genotype_string,
-                            10,
-                            10,
-                            0.5)
+                            all_depth,
+                            af_str)
                 else:
                     print('[INFO] {} {} miss and no variant support'.format(self.sample_ctg_info, pos))
             return
@@ -959,20 +969,45 @@ class RepresentationUnification(object):
                 genotype_string = '/'.join(map(str, alt_dict[pos].phased_genotype))
                 variant = ','.join(candidate.alternate_bases)
                 ref_base = candidate.reference_bases
-                rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                    self.contig_name, pos, ref_base, variant, 10, 'PASS', 'R', genotype_string, 10, 10, 0.5)
+                alt_base = candidate.alternate_bases
+                # all_depth = 0
+                # af_str = []
+                # for alt in alt_base:
+                #     all_depth += alt_dict[pos].alt_list[0][1]
+                #     af = alt_dict[pos].alt_list[0][2]
+                #     af_str.append("%.4f" % af)
+                # af_str = ','.join(af_str)
+                af_list = alt_dict[pos].af_list if pos in alt_dict else []
+                af_str = ','.join(["%.4f" % af for af in af_list]) if len(af_list) else '0.000'
+                all_depth = alt_dict[pos].depth if pos in alt_dict else 0
+                rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%s\t%s\t%s\tGT:DP:AF\t%s:%d:%s" % (
+                    self.contig_name, pos, ref_base, variant, ".", 'PASS', 'R', genotype_string, all_depth, af_str)
                 continue
             if sum(candidate_genotypes) == 0:
                 continue
             if not len(candidate.alternate_bases):
                 continue
             g1, g2 = candidate_genotypes
-            variant = set()
+            variant = []
             ref_base = candidate.reference_bases
+            af_list = []
+
             if g1 != 0:
-                variant.add(candidate.alternate_bases[g1 - 1])
+                variant.append(candidate.alternate_bases[g1 - 1])
+                if pos in alt_dict:
+                    af = alt_dict[pos].af_list[g1-1]
+                    af_list.append("%.4f" % af)
+                else:
+                    af_list.append('0.0000')
             if g2 != 0:
-                variant.add(candidate.alternate_bases[g2 - 1])
+                variant.append(candidate.alternate_bases[g2 - 1])
+                if pos in alt_dict:
+                    af = alt_dict[pos].af_list[g2-1]
+                    af_list.append("%.4f" % af)
+                else:
+                    af_list.append('0.0000')
+            variant = list(OrderedDict.fromkeys((variant)))
+            af_list = list(OrderedDict.fromkeys(af_list))
             if g1 == 0 or g2 == 0:
                 genotype_string = '0/1'
             elif g1 == g2:
@@ -984,11 +1019,12 @@ class RepresentationUnification(object):
             if candidate.start in all_pos:
                 continue
             all_pos.add(pos)
-
+            af_str = ','.join(af_list) if len(af_list) else '0.0000'
+            all_depth = alt_dict[pos].depth if pos in alt_dict else 0
             if output_vcf_fn is not None:
                 # For efficiency, we only compute reference base, altnertive base and genotype for GetTruth.py currently
-                print("%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                    self.contig_name, candidate.start, ref_base, variant, 10, 'PASS', 'U', genotype_string, 10, 10, 0.5), file=output_vcf_fn)
+                print("%s\t%d\t.\t%s\t%s\t%s\t%s\t%s\tGT:DP:AF\t%s:%d:%s" % (
+                    self.contig_name, candidate.start, ref_base, variant, ".", 'PASS', 'U', genotype_string, all_depth, af_str), file=output_vcf_fn)
                 if pos in rescue_dict:
                     del rescue_dict[pos]
         for idx, (pos, raw_genotype, truth_genotype) in enumerate(
@@ -1012,11 +1048,19 @@ class RepresentationUnification(object):
 
                     ref_base = variant_dict[pos].reference_bases
                     variant = ','.join(variant_dict[pos].alternate_bases)
+                    if variant == "":
+                        continue
                     genotype_string = '/'.join(map(str, variant_dict[pos].genotype))
 
+                    af_list = alt_dict[pos].af_list if pos in alt_dict else []
+
+                    af_str = ','.join(["%.4f" % af for af in af_list]) if len(af_list) else '0.0000'
+                    if af_str == '0.0000':
+                        continue
+                    all_depth = alt_dict[pos].depth if pos in alt_dict else 0
                     if output_vcf_fn is not None:
-                        rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%d\t%s\t%s\tGT:GQ:DP:AF\t%s:%d:%d:%.4f" % (
-                            self.contig_name, pos, ref_base, variant, 10, 'PASS', 'R', genotype_string, 10, 10, 0.5)
+                        rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%s\t%s\t%s\tGT:DP:AF\t%s:%d:%s" % (
+                            self.contig_name, pos, ref_base, variant, ".", 'PASS', 'R', genotype_string, all_depth, af_str)
 
 
 def find_chunk_id(center_pos, chunk_num, ctg_name, fai_fn):
@@ -1184,7 +1228,7 @@ def UnifyRepresentation(args):
             cigar_count = ' '.join([' '.join([item, str(len(var_read_dict[item].split(' ')))]) for item in var_read_dict.keys()])
             ref_base = reference_sequence[pos - reference_start]
             pos_in_truths = pos in variant_dict
-            ref_base, alt_base, alt_list = decode_alt_info(cigar_count=cigar_count,
+            ref_base, alt_base, alt_list, af_list = decode_alt_info(cigar_count=cigar_count,
                                                                    ref_base=ref_base,
                                                                    depth=depth,
                                                                    minimum_allele_gap=minimum_allele_gap)
@@ -1196,6 +1240,7 @@ def UnifyRepresentation(args):
                                      genotype2=-1,
                                      candidate=True,
                                      depth=depth,
+                                     af_list=af_list,
                                      alt_list=alt_list)
 
             for variant, read_str in var_read_dict.items():

@@ -345,6 +345,7 @@ class Position(object):
         self.phased_genotype = None
         self.hap_count_dict = defaultdict(int)
         self.alt_list = alt_list
+        self.af_list = af_list
     def update_info(self, ref_base, alt_base, genotype):
         self.reference_bases = ref_base
         self.alternate_bases = alt_base
