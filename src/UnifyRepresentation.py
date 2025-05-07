@@ -5,9 +5,6 @@ import json
 import shlex
 import os
 
-# import sys
-# sys.path.insert(0, '/autofs/bal36/zxzheng/somatic/Clair-somatic/scripts/ru_analysis/github/Repun')
-
 from collections import Counter
 from argparse import ArgumentParser, SUPPRESS
 from collections import defaultdict, OrderedDict
