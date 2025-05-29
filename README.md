@@ -27,6 +27,8 @@ Ensuring a unified variant representation aligning the sequencing data is critic
 ----
 
 ## Latest Updates
+*v0.1.2 (May 29, 2025)* : 1. Added functionality to output two VCF files using truth coordinates and candidate coordinates in somatic mode.
+
 *v0.1.1 (May 07, 2025)* : 1. Fixed duplicated DP and AF in somatic mode. 2. Added DP and AF in germline output VCF.
 
 *v0.1.0 (Apr 18, 2025)* : 1. Added somatic variant representation unification workflow. User can enable by using the `--somatic_mode` option. The somatic mode prioritizes only low-VAF sites (default 0.08, configurable using `--max_af_for_somatic_unification`) during processing and optimized alignment scanning for computational efficiency. A configurable edit distance thresholds (maximum 0 for SNV and 4 for Indel) is used. This allows for gaps between VCF haplotypes and alignment haplotypes for more potential matches into manual consideration.

@@ -520,7 +520,7 @@ def check_args(args):
 
 
 def print_args(args):
-    version = '0.0.1'
+    version = '0.1.2'
     logging("")
     logging("[INFO] RU VERSION: {}".format(version))
     logging("[INFO] BAM FILE PATH: {}".format(args.bam_fn))
@@ -1207,8 +1207,11 @@ def main():
 
     runtime = time() - call_start_time
     logging("[INFO] Total time elapsed: %im%.2fs\n" % (int(runtime/60), int(runtime % 60)))
-    logging("[INFO] Finish Representation Unification, output vcf file path: {}/unified.vcf.gz\n".format(args.output_dir))
-
+    if args.somatic_mode:
+        logging("[INFO] Finish Representation Unification, output vcf file using truth coordinate: {}/unified_truths.vcf.gz\n".format(args.output_dir))
+        logging("[INFO] Finish Representation Unification, output vcf file using candidate coordinate: {}/unified_candidates.vcf.gz\n".format(args.output_dir))
+    else:
+        logging("[INFO] Finish Representation Unification, output vcf file: {}/unified.vcf.gz\n".format(args.output_dir))
     if args.tee is not None:
         args.tee.stdin.close()
 
