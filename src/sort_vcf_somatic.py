@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import shlex
 from sys import stdin, exit
@@ -81,6 +82,55 @@ def check_header_in_gvcf(header, contigs_list):
         update_header.append(row)
 
     return update_header
+
+def parse_variant_string(s):
+    result = {"Truths": [], "Candidates": []}
+    s = re.sub(r'\s+', '', s)
+
+    def clean_value(v):
+        v = v.strip('}"\'')
+        try:
+            return int(v)
+        except ValueError:
+            try:
+                return float(v)
+            except ValueError:
+                return v
+    def parse_record(record_str):
+        record = {}
+        parts = re.split(r'[,;]', record_str)
+        for part in parts:
+            if '=' in part:
+                key, value = part.split('=', 1)
+                record[key.strip()] = clean_value(value)
+        return record
+
+    truths_match = re.search(r'Truths=\{(.*?)\}(?=;Candidates=|$)', s)
+    if truths_match:
+        for record_str in truths_match.group(1).split('},{'):
+            record = parse_record(record_str)
+            if record:
+                result["Truths"].append(record)
+
+    candidates_match = re.search(r'Candidates=\{(.*?)\}$', s)
+    if candidates_match:
+        for record_str in candidates_match.group(1).split('},{'):
+            record = parse_record(record_str)
+            if record:
+                result["Candidates"].append(record)
+
+    return result["Truths"], result["Candidates"]
+
+
+def output_candidate_row(raw_row, candidate_info):
+    columns = raw_row.rstrip().split('\t')
+    columns[1] = str(candidate_info['POS'])
+    columns[3] = candidate_info['REF']
+    columns[4] = candidate_info['ALT']
+    columns[8] = "DP:AF:ED"
+    af = float(candidate_info['AF'])
+    columns[9] = f"{candidate_info['DP']}:{af:.4f}:" + columns[9]
+    return '\t'.join(columns) + '\n'
 
 def sort_vcf_from_stdin(args):
     """
@@ -194,13 +244,20 @@ def sort_vcf_from(args):
     else:
         output = open(output_fn, 'w')
 
+    output_candidate_fn = None
+    if args.output_candidate_fn is not None:
+        output_candidate_fn = open(args.output_candidate_fn, 'w')
+
     vcf_header = output_vcf_header(reference_file_path=ref_fn, output_fn=None, sample_name=sample_name)
     unified_count = 0
+    candidate_set = set()
     for contig in contigs_order_list:
         contig_dict = defaultdict(str)
+        contig_candidate_dict = defaultdict(str)
         contig_vcf_fns = [fn for fn in all_files if contig in fn]
-
         contig_truth_dict = defaultdict()
+
+        unified_truth_set = set()
         for k, v in truth_dict.items():
             if k[0] == contig:
                 contig_truth_dict[k] = v
@@ -221,12 +278,23 @@ def sort_vcf_from(args):
                         header.append(row)
                     continue
                 # use the first vcf header
-                columns = row.strip().split(maxsplit=3)
+                columns = row.strip().split(maxsplit=9)
                 ctg_name, pos = columns[0], columns[1]
                 # skip vcf file sharing same contig prefix, ie, chr1 and chr11
                 if ctg_name != contig:
                     break
                 contig_dict[int(pos)] = row
+                if output_candidate_fn and columns[7].startswith('U'):
+                    unified_truth, unified_candidate = parse_variant_string(columns[7][2:])
+                    for k in unified_truth:
+                        unified_truth_set.add(int(k['POS']))
+
+                    for k in unified_candidate:
+                        candidate_pos = int(k["POS"])
+                        candidate_row = output_candidate_row(row, k)
+                        contig_candidate_dict[candidate_pos] = candidate_row
+                        candidate_set.add((ctg_name, candidate_pos))
+
                 no_vcf_output = False
             fn.close()
             if is_lz4_format:
@@ -245,10 +313,12 @@ def sort_vcf_from(args):
                     vcf_header.insert(insert_index, cmdline_str)
 
             output.write(''.join(vcf_header))
+            if output_candidate_fn is not None:
+                output_candidate_fn.write(''.join(vcf_header))
+
             need_write_header = False
+
         all_pos = sorted([k[1] for k in truth_dict.keys() if k[0] == contig])
-
-
         for pos in all_pos:
             if pos in contig_dict:
                 row = contig_dict[pos]
@@ -268,7 +338,8 @@ def sort_vcf_from(args):
                     if 'U' in columns[7]:
                         unified_count += 1
                         columns[8] = 'DP:AF:' + columns[8]
-                        columns[9] = f'{dp}:{af}:' + columns[9]
+                        af = float(af)
+                        columns[9] = f'{dp}:{af:.4f}:' + columns[9]
                     row = '\t'.join(columns) + '\n'
 
             else:
@@ -284,7 +355,31 @@ def sort_vcf_from(args):
                     row = '\t'.join(columns) + '\n'
 
             output.write(row)
-    print("[INFO] Unified {} truth variants".format(unified_count))
+
+        all_candidate_pos = sorted(list(set([k[1] for k in truth_dict.keys() if k[0] == contig and k[1] not in unified_truth_set] + [k for k in contig_candidate_dict])))
+
+        for pos in all_candidate_pos:
+            if pos in contig_candidate_dict:
+                row = contig_candidate_dict[pos]
+                if args.vaf_threshold_for_pass is not None:
+                    af = row.rstrip().split('\t')[9].split(':')[1]
+                    vaf = float(af)
+                    if vaf > float(args.vaf_threshold_for_pass):
+                        row = row.replace("LowVAF", "PASS")
+                    elif 'U' not in row.rstrip().split('\t')[7]:
+                        row = row.replace("PASS", "LowVAF")
+            else:
+                row = truth_dict[(contig, pos)]
+                if args.vaf_threshold_for_pass is not None:
+                    dp, af = row.rstrip().split('\t')[9].split(':')[0:2]
+                    vaf = float(af)
+                    if vaf > float(args.vaf_threshold_for_pass):
+                        row = row.replace("LowVAF", "PASS")
+                    elif 'U' not in row.rstrip().split('\t')[7]:
+                        row = row.replace("PASS", "LowVAF")
+            output_candidate_fn.write(row)
+
+    print("[INFO] Unified {} truth variants to {} candidate variants".format(unified_count, len(candidate_set)))
     if compress_gvcf_output:
         write_proc.stdin.close()
         write_proc.wait()
@@ -292,6 +387,8 @@ def sort_vcf_from(args):
         return
     else:
         output.close()
+        if output_candidate_fn:
+            output_candidate_fn.close()
 
     if row_count == 0:
         print (log_warning("[WARNING] No vcf file found, output empty vcf file"))
@@ -312,12 +409,18 @@ def sort_vcf_from(args):
         print("[INFO] Need some time to compress and index GVCF file...")
     compress_index_vcf(output_fn)
 
+    if output_candidate_fn is not None:
+        compress_index_vcf(args.output_candidate_fn)
+
 
 def main():
     parser = ArgumentParser(description="Sort a VCF file according to contig name and starting position")
 
     parser.add_argument('--output_fn', type=str, default=None, required=True,
                         help="Output VCF filename, required")
+
+    parser.add_argument('--output_candidate_fn', type=str, default=None,
+                        help="Output VCF, output the candidate VCF for unified variants, required")
 
     parser.add_argument('--truth_vcf_fn', type=str, default=None,
                         help="Truth VCF filename, required")

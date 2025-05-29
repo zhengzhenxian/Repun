@@ -690,7 +690,8 @@ def ru_somatic(args):
     if args.vaf_threshold_for_pass is not None:
         p_mv_command += ' --vaf_threshold_for_pass ' + str(args.vaf_threshold_for_pass)
     p_mv_command += ' --truth_vcf_fn ' + args.output_dir + '/tmp/af_distribution/truths'
-    p_mv_command += ' --output_fn ' + args.output_dir + '/unified.vcf'
+    p_mv_command += ' --output_fn ' + args.output_dir + '/unified_truths.vcf'
+    p_mv_command += ' --output_candidate_fn ' + args.output_dir + '/unified_candidates.vcf'
     commands_list.append(p_mv_command)
 
     # Execute commands step by step
