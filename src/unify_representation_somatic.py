@@ -1251,7 +1251,7 @@ class RepresentationUnification(object):
                     zip(match_pairs.truths, match_pairs.truth_genotypes)):
 
                 pos = truth.start
-                STR="{" + "POS={};REF={};ALT={};GT={}".format(pos, truth.reference_bases, truth.alternate_bases[0], get_genotype(truth_genotypes))
+                STR="{" + "POS={},REF={},ALT={},GT={}".format(pos, truth.reference_bases, truth.alternate_bases[0], get_genotype(truth_genotypes))
                 STR += "}"
                 truths_list.append(STR)
 
@@ -1284,7 +1284,7 @@ class RepresentationUnification(object):
                     continue
 
                 editing_distance = match_pairs.edit_distance if match_pairs is not None else -1
-
+                editing_distance = int(editing_distance)
                 string  =f"{self.contig_name}\t{str(pos)}\t.\t{truth.reference_bases}\t{truth.alternate_bases[0]}\t.\tPASS\t{INFO}\tED\t{editing_distance}"
 
                 output_vcf_fn.write(string + '\n')

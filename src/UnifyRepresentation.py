@@ -939,7 +939,8 @@ class RepresentationUnification(object):
                     af_list = alt_dict[pos].af_list if pos in alt_dict else []
                     af_str = ','.join(["%.4f" % af for af in af_list]) if len(af_list) else '0.000'
                     all_depth = alt_dict[pos].depth if pos in alt_dict else 0
-
+                    if variant == '':
+                        continue
                     # For efficiency, we currently only compute reference base, altnertive base and genotype from GetTruth.py
                     rescue_dict[pos] = "%s\t%d\t.\t%s\t%s\t%s\t%s\t%s\tGT:DP:AF\t%s:%d:%s" % (
                             self.contig_name,
@@ -967,6 +968,8 @@ class RepresentationUnification(object):
                 variant = ','.join(candidate.alternate_bases)
                 ref_base = candidate.reference_bases
                 alt_base = candidate.alternate_bases
+                if variant == '':
+                    continue
                 # all_depth = 0
                 # af_str = []
                 # for alt in alt_base:
