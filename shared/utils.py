@@ -270,8 +270,6 @@ def get_header(reference_file_path=None, cmd_fn=None, sample_name="SAMPLE", vers
     if gvcf:
         header = dedent("""\
             ##fileformat=VCFv4.2
-            ##source=Clair3
-            ##clair3_version={}
             ##FILTER=<ID=PASS,Description="All filters passed">
             ##FILTER=<ID=LowQual,Description="Low quality variant">
             ##FILTER=<ID=RefCall,Description="Reference call">
@@ -292,8 +290,6 @@ def get_header(reference_file_path=None, cmd_fn=None, sample_name="SAMPLE", vers
     else:
         header = dedent("""\
             ##fileformat=VCFv4.2
-            ##source=Clair3
-            ##clair3_version={}
             ##FILTER=<ID=PASS,Description="All filters passed">
             ##FILTER=<ID=LowQual,Description="Low quality variant">
             ##FILTER=<ID=RefCall,Description="Reference call">
@@ -319,6 +315,16 @@ def get_header(reference_file_path=None, cmd_fn=None, sample_name="SAMPLE", vers
         insert_index = 3 if len(header_list) >= 3 else len(header_list) - 1
         header_list.insert(insert_index, cmdline_str)
         header = "\n".join(header_list) + '\n'
+
+    if reference_file_path is not None:
+        reference_index_file_path = file_path_from(reference_file_path, suffix=".fai", exit_on_not_found=True, sep='.')
+        with open(reference_index_file_path, "r") as fai_fp:
+            for row in fai_fp:
+                columns = row.strip().split("\t")
+                contig_name, contig_size = columns[0], columns[1]
+                header += "##contig=<ID=%s,length=%s>" % (contig_name, contig_size) + '\n'
+
+    header += '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t%s' % (sample_name) + '\n'
 
     return header
 

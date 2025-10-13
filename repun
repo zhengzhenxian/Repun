@@ -668,7 +668,7 @@ def ru_somatic(args):
     lv_command += ' --extend_bed ' + args.output_dir + '/tmp/split_beds/bed_{1}'
     lv_command += ' --chunk_id {2}'
     lv_command += ' --chunk_num {3}'
-    lv_command += ' --sampleName {4}'
+    lv_command += ' --sampleName ' + args.sample_name
     if args.snv_maximum_edit_distance is not None:
         lv_command += ' --snv_maximum_edit_distance ' + str(args.snv_maximum_edit_distance)
     if args.indel_maximum_edit_distance is not None:
@@ -676,7 +676,6 @@ def ru_somatic(args):
     if args.allow_candidate_haplotype_shorter_than_truth_haplotype:
         lv_command += ' --allow_candidate_haplotype_shorter_than_truth_haplotype True'
     lv_command += ' :::: ' + os.path.join(args.output_dir, 'tmp', 'CHUNK_LIST')
-    lv_command += ' ::: ' + args.sample_name
     lv_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/6_RU.log'
     commands_list.append(lv_command)
 
@@ -692,6 +691,7 @@ def ru_somatic(args):
     p_mv_command += ' --truth_vcf_fn ' + args.output_dir + '/tmp/af_distribution/truths'
     p_mv_command += ' --output_fn ' + args.output_dir + '/unified_truths.vcf'
     p_mv_command += ' --output_candidate_fn ' + args.output_dir + '/unified_candidates.vcf'
+    p_mv_command += ' --sampleName ' + args.sample_name
     commands_list.append(p_mv_command)
 
     # Execute commands step by step
@@ -862,10 +862,9 @@ def ru(args):
     lv_command += ' --chunk_id {2}'
     lv_command += ' --chunk_num {3}'
     lv_command += ' --test_pos False'
-    lv_command += ' --sampleName {4}'
+    lv_command += ' --sampleName ' + args.sample_name
     lv_command += ' --subsample_ratio 1000'
     lv_command += ' :::: ' + os.path.join(args.output_dir, 'tmp', 'CHUNK_LIST')
-    lv_command += ' ::: ' + args.sample_name
     lv_command += ' ) 2>&1 | tee ' + args.output_dir + '/logs/6_RU.log'
     commands_list.append(lv_command)
 

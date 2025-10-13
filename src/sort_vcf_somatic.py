@@ -20,7 +20,6 @@ def compress_index_vcf(input_vcf):
 def output_header(output_fn, reference_file_path, cmd_fn=None, sample_name='SAMPLE'):
     output_file = open(output_fn, "w")
     header_str = get_header(reference_file_path=reference_file_path, cmd_fn=cmd_fn, sample_name=sample_name)
-    print(header_str)
     output_file.write(header_str)
     output_file.close()
 
@@ -61,13 +60,8 @@ def output_vcf_header(reference_file_path, output_fn=None, sample_name='SAMPLE')
         return header
 
 def print_calling_step(output_fn=""):
+    print (log_warning("[WARNING] Output the header only for {}".format(output_fn)))
 
-    merge_output = os.path.join(os.path.dirname(output_fn), 'merge_output.vcf.gz')
-    pileup_output = os.path.join(os.path.dirname(output_fn), 'pileup.vcf.gz')
-
-    print (log_warning("[WARNING] Copying pileup.vcf.gz to {}".format(merge_output)))
-    subprocess.run('cp {} {}'.format(pileup_output, merge_output), shell=True, stdout=subprocess.PIPE,
-                   stderr=subprocess.PIPE)
 
 def check_header_in_gvcf(header, contigs_list):
     # Only output the contigs processed to be consistent with GATK
@@ -202,6 +196,10 @@ def sort_vcf_from(args):
                 "[WARNING] No vcf file found with prefix:{}/{}, output empty vcf file".format(input_dir,vcf_fn_prefix)))
             compress_index_vcf(output_fn)
             print_calling_step(output_fn=output_fn)
+            if args.output_candidate_fn is not None:
+                output_header(output_fn=args.output_candidate_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn,
+                              sample_name=sample_name)
+                compress_index_vcf(args.output_candidate_fn)
             return
 
     if vcf_fn_suffix is not None:
@@ -212,6 +210,10 @@ def sort_vcf_from(args):
                 "[WARNING] No vcf file found with suffix:{}/{}, output empty vcf file".format(input_dir,vcf_fn_prefix)))
             compress_index_vcf(output_fn)
             print_calling_step(output_fn=output_fn)
+            if args.output_candidate_fn is not None:
+                output_header(output_fn=args.output_candidate_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn,
+                              sample_name=sample_name)
+                compress_index_vcf(args.output_candidate_fn)
             return
 
     all_contigs_list = []
@@ -395,12 +397,19 @@ def sort_vcf_from(args):
         output_header(output_fn=output_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn, sample_name=sample_name)
         compress_index_vcf(output_fn)
         print_calling_step(output_fn=output_fn)
+        if args.output_candidate_fn is not None:
+            output_header(output_fn=args.output_candidate_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn, sample_name=sample_name)
+            compress_index_vcf(args.output_candidate_fn)
+
         return
     if no_vcf_output:
         output_header(output_fn=output_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn, sample_name=sample_name)
         print (log_warning("[WARNING] No variant found, output empty vcf file"))
         compress_index_vcf(output_fn)
         print_calling_step(output_fn=output_fn)
+        if args.output_candidate_fn is not None:
+            output_header(output_fn=args.output_candidate_fn, reference_file_path=ref_fn, cmd_fn=cmd_fn, sample_name=sample_name)
+            compress_index_vcf(args.output_candidate_fn)
         return
 
     if vcf_fn_suffix == ".tmp.gvcf":
