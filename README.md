@@ -27,6 +27,8 @@ Ensuring a unified variant representation aligning the sequencing data is critic
 ----
 
 ## Latest Updates
+*v0.1.3 (Oct 14, 2025)* : 1. Fixed an issue where sample names(--sample_name) were not being processed correctly. 2. Fixed the bgzip utility to correctly handle empty output files.
+
 *v0.1.2 (May 29, 2025)* : 1. Added functionality to output two VCF files using truth coordinates and candidate coordinates in somatic mode.
 
 *v0.1.1 (May 07, 2025)* : 1. Fixed duplicated DP and AF in somatic mode. 2. Added DP and AF in germline output VCF.
